@@ -51,8 +51,15 @@ struct Main {
         print("→ transcribing \(audio.lastPathComponent) with \(model.label)")
         let t = try await WhisperCliBackend().transcribe(
             audio: audio, language: lang, model: model, useTimestamps: false)
-        print("—"); print(t.text); print("—")
-        print("lang=\(t.language)  model=\(t.model.rawValue)  wallclock=\(String(format: "%.2f", t.realtimeFactor))s")
+         print("—"); print(t.text); print("—")
+        var meta = "lang=\(t.language)  model=\(t.model.rawValue)"
+        if t.durationSeconds > 0 {
+             meta += "  audio=\(String(format: "%.2f", t.durationSeconds))s"
+                    + "  factor=\(String(format: "%.2f", t.realtimeFactor))x"
+              } else {
+            meta += "  wallclock=\(String(format: "%.2f", t.realtimeFactor))s"
+              }
+        print(meta)
        }
 
        // MARK: - TTS
@@ -90,8 +97,8 @@ struct Main {
                            .speak(text, mode: .system, voice: voice, play: true)
                  } else if FileManager.default.fileExists(atPath: url.path) {
                 // afplay blocks until playback completes — robust in a CLI.
-                try await Shell.run(at: ProcessInfo.processInfo.environment["AFPLAY"] ?? "afplay",
-                                   arguments: [url.path])
+                _ = try await Shell.run(at: ProcessInfo.processInfo.environment["AFPLAY"] ?? "afplay",
+                                      arguments: [url.path])
                 print("✓ played via afplay")
                  } else {
                 print("[no on-disk audio to play; run with --no-play to skip]")
