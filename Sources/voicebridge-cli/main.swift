@@ -1,0 +1,151 @@
+import Foundation
+import VoiceBridgeCore
+
+/// voicebridge-cli — a headless demo that exercises VoiceBridgeCore so you can
+/// see the STT→TTS pipeline work *before* wiring the SwiftUI app. Not shipped in
+/// the GUI target, but useful for CI / smoke tests.
+///
+/// Usage:
+///    voicebridge-cli stt   <audio> [lang] [model]
+///    voicebridge-cli tts   --text "hello" [--voice NAME] [--engine piper|system|edgeTTS|kokoro]
+///    voicebridge-cli ping                  // report engine + model availability
+///
+/// Examples:
+///    ./voicebridge-cli stt  out.wav en large-v3-turbo
+///    ./voicebridge-cli tts   --text "This is Piper, fully offline." --voice en_US-lessac-medium
+///    ./voicebridge-cli ping
+@main
+@MainActor
+struct Main {
+     // `@main` + `@MainActor`: the config manager and `speak()` are main-actor
+      // isolated, so the whole command dispatch runs on the main actor.
+    static func main() async {
+        let args = Array(CommandLine.arguments.dropFirst())
+        guard !args.isEmpty else {
+              printMenu()
+              return
+             }
+        do {
+            switch args[0] {
+            case "stt":      try await runSTT(Array(args.dropFirst()))
+            case "tts":      try await runTTS(Array(args.dropFirst()))
+            case "ping":     runPing()
+            case "help","-h","--help": printMenu()
+            default:
+                print("Unknown subcommand: \(args[0])"); printMenu()
+             }
+          } catch {
+            print("❌ \(error.localizedDescription)"); exit(1)
+           }
+       }
+
+       // MARK: - STT
+    static func runSTT(_ args: [String]) async throws {
+        guard !args.isEmpty else {
+            print("usage: stt <audio> [lang] [model]"); return
+            }
+        let audio = URL(fileURLWithPath: args[0])
+        let lang = args.count > 1 ? args[1] : nil
+        let model = SttModel(rawValue: args.count > 2 ? args[2] : "large-v3-turbo") ?? .largeV3Turbo
+
+        print("→ transcribing \(audio.lastPathComponent) with \(model.label)")
+        let t = try await WhisperCliBackend().transcribe(
+            audio: audio, language: lang, model: model, useTimestamps: false)
+        print("—"); print(t.text); print("—")
+        print("lang=\(t.language)  model=\(t.model.rawValue)  wallclock=\(String(format: "%.2f", t.realtimeFactor))s")
+       }
+
+       // MARK: - TTS
+    static func runTTS(_ args: [String]) async throws {
+        var text = "Hello. This is a demo of VoiceBridge's engine selector."
+        var voice: String? = nil
+        var engine: TTSMode = .piper
+        var noPlay = false
+
+        var it = args.makeIterator()
+        while let tok = it.next() {
+            switch tok {
+            case "--text":  text = it.next() ?? text
+            case "--voice": voice = it.next()
+            case "--engine": if let raw = it.next(), let m = TTSMode(rawValue: raw) { engine = m }
+            case "--no-play": noPlay = true
+            default: print("ignoring: \(tok)")
+              }
+           }
+
+        print("→ speaking \(text.count) chars via \(engine.rawValue); voice=\(voice ?? "default")")
+        let cfg = TTSConfigManager()
+        cfg.selectedMode = engine
+        cfg.selectedModelFile = voice
+        // Always synthesize with play:false, then play via a reliable path below
+         // (avoids AVAudioPlayer's runloop-spin hanging a headless CLI).
+        let url = try await TTSManager(config: cfg)
+                       .speak(text, mode: engine, voice: voice, play: false)
+        print("output: \(url.path)")
+
+        if !noPlay {
+            if engine == .system {
+                // Built-in engine speaks in place (no file). Re-speak with play.
+               try await TTSManager(config: cfg)
+                           .speak(text, mode: .system, voice: voice, play: true)
+                 } else if FileManager.default.fileExists(atPath: url.path) {
+                // afplay blocks until playback completes — robust in a CLI.
+                try await Shell.run(at: ProcessInfo.processInfo.environment["AFPLAY"] ?? "afplay",
+                                   arguments: [url.path])
+                print("✓ played via afplay")
+                 } else {
+                print("[no on-disk audio to play; run with --no-play to skip]")
+                 }
+          }
+        }
+
+       // MARK: - helpers
+    static func runPing() {
+        print("VoiceBridge engine & model availability:")
+        print("  STT  whisper-cli : \(whisperAvailable())")
+        print("  TTS  piper       : \(piperAvailable())")
+        print("  TTS  edge-tts    : \(edgeAvailable())")
+        print("  TTS  system (AVSpeech): always available")
+        print("  models root : \(ModelPaths.root.path)")
+        if !whisperAvailable() {
+            print("\nHint: `brew install whisper-cpp` then set WHISPER_CLI, or run scripts/fetch-whisper-turbo.sh.")
+         }
+        if !piperAvailable() {
+            print("Hint: `scripts/install-piper.sh` to enable Piper (offline TTS).")
+           }
+     }
+
+    private static func onPath(_ name: String) -> Bool {
+        Shell.pathLookup(name) != nil
+       }
+    private static func whisperAvailable() -> Bool {
+        if let p = ProcessInfo.processInfo.environment["WHISPER_CLI"],
+           FileManager.default.isExecutableFile(atPath: p) { return true }
+        for c in ["/opt/homebrew/opt/whisper-cpp/bin/whisper-cli",
+                  "/usr/local/opt/whisper-cpp/bin/whisper-cli"]
+                 where FileManager.default.isExecutableFile(atPath: c) {
+            return true
+            }
+        return onPath("whisper-cli")
+        }
+    private static func piperAvailable() -> Bool {
+        if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_PIPER"],
+           FileManager.default.isExecutableFile(atPath: p) { return true }
+        return onPath("piper")
+        }
+    private static func edgeAvailable() -> Bool {
+        if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_EDGE_TTS"],
+           FileManager.default.isExecutableFile(atPath: p) { return true }
+        return onPath("edge-tts")
+       }
+
+     private static func printMenu() {
+        print("""
+             voicebridge-cli — run STT / TTS without opening the GUI
+              ----------------
+             stt   <audio> [lang] [model]    e.g. `stt out.wav en large-v3-turbo`
+             tts   --text "…" [--voice V] [--engine piper|system|edgeTTS|kokoro]
+             ping                           show engine + model availability
+             """)
+       }
+}

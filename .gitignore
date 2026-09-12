@@ -1,0 +1,16 @@
+# Build artifacts
+.build/
+*.xcodeproj/xcuserdata/
+DerivedData/
+
+# Model root is a user-space dir; keep it out of the repo.
+.voicebridge/
+models/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+
+# Python (Piper runtime lives in the user env, not the repo)
+__pycache__/
+*.pyc
