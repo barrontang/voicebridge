@@ -65,6 +65,7 @@ public enum VoiceError: LocalizedError, Sendable {
     case modelMissing(model: String, directory: String)
     case modelNotFound(name: String, directory: String)
     case processFailed(component: String, status: Int32, stderr: String)
+    case processTimeout(component: String, seconds: TimeInterval)
     case audioDecodeFailed(url: String, reason: String)
     case permissionDenied(capability: String)
     case engineUnavailable(engine: String, reason: String)
@@ -79,6 +80,8 @@ public enum VoiceError: LocalizedError, Sendable {
             return "Model '\(m)' not found under \(dir)"
         case .processFailed(let c, let status, let stderr):
             return "\(c) exited with status \(status).\n\(stderr)"
+        case .processTimeout(let c, let seconds):
+            return "\(c) timed out after \(Int(seconds))s (terminated)."
         case .audioDecodeFailed(let url, let reason):
             return "Could not decode audio \(url): \(reason)"
         case .permissionDenied(let cap):

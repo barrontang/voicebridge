@@ -74,7 +74,22 @@ struct Main {
             switch tok {
             case "--text":  text = it.next() ?? text
             case "--voice": voice = it.next()
-            case "--engine": if let raw = it.next(), let m = TTSMode(rawValue: raw) { engine = m }
+            case "--engine":
+                if let raw = it.next() {
+                    // Accept either a rawValue or a short alias (piper/kokoro/edge/system).
+                    var m = TTSMode(rawValue: raw)
+                    if m == nil {
+                        switch raw.lowercased()
+                                       .trimmingCharacters(in: .whitespacesAndNewlines) {
+                            case "system", "builtin", "built-in", "avspeech": m = .system
+                            case "piper": m = .piper
+                            case "kokoro": m = .kokoro
+                            case "edge", "edge-tts", "edgetts": m = .edgeTTS
+                            default: print("unknown --engine '\(raw)' (try piper|kokoro|edge|system)")
+                        }
+                    }
+                    if let m { engine = m }
+                }
             case "--no-play": noPlay = true
             default: print("ignoring: \(tok)")
               }
@@ -86,19 +101,20 @@ struct Main {
         cfg.selectedModelFile = voice
         // Always synthesize with play:false, then play via a reliable path below
          // (avoids AVAudioPlayer's runloop-spin hanging a headless CLI).
-        let url = try await TTSManager(config: cfg)
+        let result = try await TTSManager(config: cfg)
                        .speak(text, mode: engine, voice: voice, play: false)
-        print("output: \(url.path)")
+        print("output: \(result.url.path)")
+      if result.fellBack { print("\(result.statusLine)") }
 
         if !noPlay {
             if engine == .system {
                 // Built-in engine speaks in place (no file). Re-speak with play.
                try await TTSManager(config: cfg)
                            .speak(text, mode: .system, voice: voice, play: true)
-                 } else if FileManager.default.fileExists(atPath: url.path) {
+                 } else if FileManager.default.fileExists(atPath: result.url.path) {
                 // afplay blocks until playback completes — robust in a CLI.
                 _ = try await Shell.run(at: ProcessInfo.processInfo.environment["AFPLAY"] ?? "afplay",
-                                      arguments: [url.path])
+                                      arguments: [result.url.path])
                 print("✓ played via afplay")
                  } else {
                 print("[no on-disk audio to play; run with --no-play to skip]")

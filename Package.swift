@@ -4,13 +4,10 @@ import PackageDescription
 // VoiceBridge — local STT (whisper-cpp) + local TTS (Piper default).
 //
 // Targets:
-//   * VoiceBridgeCore  : framework-agnostic logic. No SwiftUI, fully testable.
-//   * voicebridge-cli  : runnable demo that exercises the core (no GUI, headless).
-//
-// The SwiftUI shell lives in ./App and is intentionally NOT part of this package:
-// an in-process GUI app needs an Xcode .xcodeproj with an app bundle. Copy the
-// three files in ./App into a new macOS App target, add the `VoiceBridgeCore`
-// product as an SPM dependency, and the same logic runs inside the GUI.
+//    * VoiceBridgeCore : framework-agnostic logic + SwiftUI config manager.
+//    * voicebridge-cli : headless demo that exercises the core.
+//    * voicebridge-gui : the SwiftUI shell in ./App, wrapped into a .app bundle
+//                       by scripts/make-app.sh so it can actually launch.
 
 let package = Package(
     name: "VoiceBridge",
@@ -19,7 +16,8 @@ let package = Package(
     ],
     products: [
         .library(name: "VoiceBridgeCore", targets: ["VoiceBridgeCore"]),
-        .executable(name: "voicebridge-cli", targets: ["voicebridge-cli"])
+        .executable(name: "voicebridge-cli", targets: ["voicebridge-cli"]),
+        .executable(name: "voicebridge-gui", targets: ["voicebridge-gui"])
     ],
     dependencies: [],
     targets: [
@@ -31,6 +29,11 @@ let package = Package(
             name: "voicebridge-cli",
             dependencies: ["VoiceBridgeCore"],
             path: "Sources/voicebridge-cli"
+        ),
+        .executableTarget(
+            name: "voicebridge-gui",
+            dependencies: ["VoiceBridgeCore"],
+            path: "App"
         ),
         .testTarget(
             name: "VoiceBridgeCoreTests",

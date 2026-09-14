@@ -40,6 +40,3 @@ struct SettingsView: View {
     }
 }
 
-#Preview {
-    SettingsView(ttsConfig: TTSConfigManager())
-}

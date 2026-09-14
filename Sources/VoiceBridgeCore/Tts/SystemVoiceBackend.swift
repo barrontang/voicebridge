@@ -12,11 +12,11 @@ import AVFoundation
 /// instead letting AVSpeech deliver audio while a runloop spin keeps it alive.
 public final class SystemVoiceBackend: TTSBackend, @unchecked Sendable {
 
-        /// In-place engine — no audio file is produced.
+         /// In-place engine — no audio file is produced.
     public var producesAudioFile: Bool { false }
     public var displayName: String { "Built-in (AVSpeechSynthesizer)" }
 
-        /// System voices are always available on macOS.
+         /// System voices are always available on macOS.
     public func isAvailable() -> Bool { true }
 
     public func synthesize(text: String, voice: String?, outputPath: URL) async throws -> URL {
@@ -26,15 +26,21 @@ public final class SystemVoiceBackend: TTSBackend, @unchecked Sendable {
                  let utter = AVSpeechUtterance(string: text)
                  utter.rate = AVSpeechUtteranceDefaultSpeechRate
                   if let voice, let v = AVSpeechSynthesisVoice.speechVoices()
-                              .first(where: { $0.name == voice }) {
+                                        .first(where: { $0.name == voice }) {
                      utter.voice = v
-                   }
+                     }
+                 // Stop whatever is currently sounding and register this synth
+                 // so a later utterance (or the UI's stop) can halt it.
+                 if Playback.assumesRunningLoop {
+                     Playback.stopAll()
+                     Playback.registerSynthesizer(synth)
+                     }
                  synth.speak(utter)
-                 // Return the (nonexistent) path so the caller's contract holds;
-                 // the orchestrator will not re-play it because
-                 // `producesAudioFile` is false.
+                   // Return the (nonexistent) path so the caller's contract
+                   // holds; the orchestrator will not re-play it because
+                   // `producesAudioFile` is false.
                  cont.resume(returning: outputPath)
-               }
-            }
-       }
+                }
+         }
+    }
 }

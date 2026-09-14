@@ -1,40 +1,82 @@
 import Foundation
 
-/// Kokoro-82M local TTS. ~80M params, excellent quality; the canonical runtime
-/// is Python (Kokoro-PyTorch exported to ONNX), so this backend shells out to
-/// an installed `kokoro` entry point. No mature Apple-native (pure Swift)
-/// runtime exists yet — hence the process-based approach. The `.onnx` +
-/// `config.json` pair lives under `<root>/tts/kokoro/`.
-public final class KokoroBackend: TTSBackend, @unchecked Sendable {
+/// Kokoro-82M TTS via the Python `kokoro` CLI.
+///
+/// The `kokoro` entry point is a Python console script (shipped with the
+/// `kokoro` pip package; on this machine it lives in the conda base env and is
+/// on PATH). It auto-downloads its 82M model (`hexgrad/Kokoro-82M`) into the
+/// HuggingFace cache on first use, so a real voice lives *there*, not in our
+/// own models dir. Pass a **voice name** (e.g. `af_bella`), not a path.
+///
+/// First import is slow (~15–60s: it loads onnxruntime), so everything funnels
+/// through `Pipeline.runWithStdin`, which drains both pipes and honors a timeout
+/// (120s here — enough for the first-run download + load).
+///
+/// NOTE on stdin: kokoro's CLI reads text from stdin by default. Its `-i`
+/// flag expects a *real* file path, so we deliberately do NOT pass `-i -`
+/// (kokoro would try to open a file literally named `-`); we simply omit it
+/// and pipe the text via stdin.
+public struct KokoroBackend: TTSBackend {
+     public let displayName = "Kokoro-82M (local)"
+   public let producesAudioFile = true
 
-    private let binary: String
-    private let modelDirectory: URL
+      /// Voice name to use by default when the caller doesn't specify one.
+   private let defaultVoice: String
+     /// Absolute path to a real `kokoro` executable (resolved from PATH / env).
+   private let binaryPath: String
 
-    public init(modelDirectory: URL = ModelPaths.kokoroDir, binaryOverride: String? = nil) {
-        self.modelDirectory = modelDirectory
-        self.binary = binaryOverride
-               ?? ProcessInfo.processInfo.environment["VOICEBRIDGE_KOKORO"]
-               ?? "kokoro"
-     }
-
-    public var displayName: String { "Kokoro-82M" }
-
-      /// Voice is the `.onnx` base name (without extension) or a directory; the
-        /// engine pairs `voice.onnx` + `voice/config.json`.
-    public func isAvailable() -> Bool {
-        FileManager.default.isExecutableFile(atPath: binary)
-               || Shell.pathLookup("kokoro") != nil
+    public init(voice: String? = nil, binaryOverride: String? = nil) {
+        let raw = binaryOverride
+                    ?? ProcessInfo.processInfo.environment["VOICEBRIDGE_KOKORO"] ?? "kokoro"
+        self.binaryPath = Shell.resolve(raw)
+        self.defaultVoice = voice
+                 ?? ProcessInfo.processInfo.environment["VOICEBRIDGE_KOKORO_VOICE"]
+                 ?? KokoroBackend.fallbackVoice
         }
 
-    public func synthesize(text: String, voice: String?, outputPath: URL) async throws -> URL {
-        let voiceName = voice ?? "kokoro-en"
-        let args = [binary,
-                    "--text", text,
-                        "--voice", "\(voiceName).onnx",
-                        "--output", outputPath.path]
-        // NOTE: exact flags depend on the kokoro CLI build you installed.
-        try Pipeline.runWithStdin(input: text, at: args,
-                                   workingDirectory: modelDirectory.path)
+       /// A well-known English voice that ships with `kokoro`.
+    static let fallbackVoice = "af_bella"
+
+           // MARK: - TTSBackend
+
+  public func isAvailable() -> Bool {
+         // The binary must resolve to a *real* file that exists (installed on
+         // PATH or via VOICEBRIDGE_KOKORO). We do NOT import kokoro here — that
+         // would take 15–60s just to load onnxruntime; the first real call will
+         // download the model to the HF cache and load it.
+        FileManager.default.fileExists(atPath: binaryPath)
+       }
+
+@discardableResult
+   public func synthesize(text: String, voice: String?, outputPath: URL) async throws -> URL {
+        let resolved = ModelPaths.cacheDir
+                             .appendingPathComponent("kokoro-\(UUID().uuidString).wav")
+        _ = try await Pipeline.runWithStdin(
+            input: text,
+            at: buildArgs(voice: voice, output: resolved),
+            timeout: 120)
+        if FileManager.default.fileExists(atPath: resolved.path) {
+             return resolved
+           }
+         // Fall back to the caller's path (the engine may have written its own).
         return outputPath
+      }
+
+            // MARK: - argument construction
+
+  private func buildArgs(voice: String?, output: URL) -> [String] {
+        var argv = [binaryPath]
+            // Kokoro takes a *voice name*, not a directory. A caller-supplied
+           // path is meaningless to kokoro, so use the default voice instead.
+        let chosenVoice = (voice?.contains("/") == false ? voice : nil)
+                              ?? defaultVoice
+        argv.append("-m"); argv.append(chosenVoice)
+        let out = ProcessInfo.processInfo.environment["KOKORO_WAV_OUT"]
+                  ?? output.path
+        argv.append("-o"); argv.append(out)
+            // Do NOT append `-i -`: kokoro's -i expects a real file path; it
+           // reads text from stdin by default when no -t/-i is given.
+         // Language is inferred from the voice, so we don't pass -l.
+        return argv
         }
 }
