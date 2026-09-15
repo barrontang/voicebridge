@@ -90,7 +90,7 @@ struct ContentView: View {
                     Button {
                         saveWav()
                        } label: {
-                       Label("Save .wav", systemImage: "square.and.arrow.down")
+                       Label("Save Speech (.wav)", systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.bordered)
                         .disabled(lastWav == nil)
@@ -172,7 +172,7 @@ struct ContentView: View {
                     Button {
                         saveTranscript()
                        } label: {
-                       Label("Save transcript as .txt", systemImage: "doc.badge.plus")
+                       Label("Save Transcript (.txt)", systemImage: "doc.badge.plus")
                         }
                         .buttonStyle(.bordered)
                         .disabled(displayTranscript.isEmpty)

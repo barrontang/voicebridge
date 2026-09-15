@@ -34,6 +34,10 @@ public final class StreamingSttController: ObservableObject {
 
          // Published UI state.
     @Published public private(set) var transcript = ""
+
+            // The full text of the previous flush, so we only append the *new*
+        // words each tick instead of re-showing everything from the start.
+        private var lastFullText = ""
      @Published public private(set) var phase: Phase = .idle
      @Published public private(set) var status = "idle - press Live to start"
 
@@ -80,6 +84,8 @@ public final class StreamingSttController: ObservableObject {
             try setupEngine()
             sessionToken = UUID()
             samplesLock.withLock { self.samples = [] }    // fresh this session
+            self.transcript = ""
+            self.lastFullText = ""
             phase = .live
             status = "Listening (live)"
             startFlushTimer()
@@ -197,13 +203,18 @@ public final class StreamingSttController: ObservableObject {
                 model: model,
                 useTimestamps: false)
             if sessionToken == token {
-                let clean = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                   // Append so each tick refines the running sentence.
-                let suffix = "\n" + clean + "     - "
-                transcript = transcript + suffix
-                status = "Live - \(result.model.label) - "
-                     + String(format: "%.1fs", result.durationSeconds)
-                  }
+                 let clean = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                       // Re-transcribing the WHOLE buffer each tick would otherwise repeat
+                       // everything from the start. Keep only the NEW words this flush found
+                       // since the previous one.
+                     let delta = StreamingSttController.deltaSince(lastFullText, full: clean)
+                     lastFullText = clean
+                     if !delta.isEmpty {
+                        transcript = transcript.isEmpty ? delta : transcript + " " + delta
+                           }
+                         status = "Live - \(result.model.label)     "
+                                   + String(format: "%.1fs", result.durationSeconds)
+                           }
               } catch {
                 // One flaky tick mustn't tear the session down.
             let msg = (error as? LocalizedError)?.localizedDescription ?? "transcript error"
@@ -257,6 +268,27 @@ public final class StreamingSttController: ObservableObject {
         for s in samples { acc += s * s }
         return sqrt(acc / Float(samples.count))
          }
+
+          // Append only the words that appeared since the previous flush. `full` is the
+          // WHOLE buffer re-transcribed this tick; diff it against `old` and return the new
+          // suffix (trimmed) so the transcript GROWS rather than repeating from the start.
+        static func deltaSince(_ old: String, full: String) -> String {
+             let full = full.trimmingCharacters(in: .whitespacesAndNewlines)
+             if full.isEmpty { return "" }
+             let old = old.trimmingCharacters(in: .whitespacesAndNewlines)
+             if old.isEmpty { return full }
+             if full == old { return "" }
+             if full.hasPrefix(old) {
+                 return String(full.dropFirst(old.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                 }
+               // Whisper can drift between flushes; fall back to the longest-common-prefix.
+             let a = Array(old)
+             let b = Array(full)
+             var i = 0
+             while i < min(a.count, b.count) && a[i] == b[i] { i += 1 }
+             if i == b.count { return "" }                 // full is a prefix of old: none new
+             return String(b[i...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
 
         // Ask for mic access without blocking the main thread (async).
     static func requestMicPermission() async -> Bool {

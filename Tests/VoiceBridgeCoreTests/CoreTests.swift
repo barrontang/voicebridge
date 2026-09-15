@@ -164,4 +164,20 @@ final class CoreTests: XCTestCase {
            XCTAssertEqual(u32(24), 16000)     // sample rate
            XCTAssertEqual(u16(34), 16)        // bits per sample
            }
+
+         // --- StreamingSttController.deltaSince (live-append, not rewrite) ---
+        /// A fresh tick appends only the NEW words; a no-change tick appends nothing.
+       @MainActor
+     func testDeltaSinceAppendsNewWordsOnly() {
+          // First tick: old empty -> whole thing is new.
+      XCTAssertEqual(StreamingSttController.deltaSince("", full: "hello"), "hello")
+          // Second tick: same text -> nothing new.
+       XCTAssertEqual(StreamingSttController.deltaSince("hello", full: "hello"), "")
+          // Third tick: a longer full -> only the tail after the old prefix.
+      XCTAssertEqual(StreamingSttController.deltaSince("hello", full: "hello world"), "world")
+          // A drifted prefix should still yield only the remainder.
+       XCTAssertEqual(StreamingSttController.deltaSince("hello wor", full: "hello worg"), "g")
+          // Empty full -> empty.
+      XCTAssertEqual(StreamingSttController.deltaSince("hello xxx", full: ""), "")
+        }
        }
