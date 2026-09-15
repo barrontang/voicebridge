@@ -21,11 +21,22 @@ public final class TTSConfigManager: ObservableObject {
     @Published public var modelRoot: URL
 
         /// The currently-active engine. Default is Piper per the project brief.
-    @Published public var selectedMode: TTSMode = .piper
+    @Published public var selectedMode: TTSMode = .piper {
+        didSet { persist() }
+       }
+
+    /// When we last wrote config to disk - shown on the Settings page so the
+    /// user can confirm their change actually applied (and persisted).
+    @Published public private(set) var configSavedAt: Date? = nil
+
+    // Guard against writing during the initial load().
+    private var isLoaded = false
 
         /// The voice the picked engine loads. For Piper this is a filename; for
        /// edge-tts / system it's a voice name. `nil` means "use engine default".
-    @Published public var selectedModelFile: String?
+    @Published public var selectedModelFile: String? = nil {
+        didSet { persist() }
+     }
 
         /// Voices found on-disk. Refreshed via `scan()` ("刷新本地模型文件夹").
     @Published public var availableLocalModels: [String] = []
@@ -33,10 +44,54 @@ public final class TTSConfigManager: ObservableObject {
         /// The directory `scan()` looks at for `.onnx` Piper voices.
     @Published public var scanDirectory: URL
 
+    public static var persistURL: URL {
+        var comps = FileManager.default.temporaryDirectory
+                     .deletingLastPathComponent()
+        comps.appendPathComponent("voicebridge/config.json")
+        return comps
+       }
+
+     @discardableResult public func persist() -> URL? {
+        guard isLoaded else { return nil }
+        struct Cfg: Codable { var mode: TTSMode; var voice: String? }
+        let cfg = Cfg(mode: selectedMode, voice: selectedModelFile)
+        do {
+            let data = try JSONEncoder().encode(cfg)
+            let url = Self.persistURL
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            configSavedAt = Date()
+            return url
+             } catch {
+            return nil
+             }
+        }
+
+    /// Speak a short sample with the currently selected engine + voice, so the
+     /// user can confirm from the Settings page that their change is live.
+    @MainActor public func previewSpeak(_ text: String) async {
+        _ = try? await TTSManager(config: self)
+                     .speak(text, mode: selectedMode, voice: selectedModelFile, play: true)
+        }
+
+     func load() {
+        let url = Self.persistURL
+        guard let data = try? Data(contentsOf: url) else { return }
+        struct Cfg: Codable { var mode: TTSMode; var voice: String? }
+        if let cfg = try? JSONDecoder().decode(Cfg.self, from: data) {
+            selectedMode = cfg.mode
+             selectedModelFile = cfg.voice
+         }
+        }
+
     public init() {
         self.modelRoot = ModelPaths.root
         self.scanDirectory = ModelPaths.piperVoiceDir
-        }
+        load()
+        self.isLoaded = true
+       }
 
        /// The canonical model root for this instance. Forwards to
          /// `ModelPaths.root` (overridable via `VOICEBRIDGE_MODELS_MAP`).

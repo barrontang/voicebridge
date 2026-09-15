@@ -132,4 +132,36 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(WhisperTranscriptParser.loadText(atPath: file.path), "hello world")
         XCTAssertEqual(WhisperTranscriptParser.loadText(atPath: "/no/such/file.txt"), "")
           }
-}
+
+          // --- StreamingSttController.writeWAV16 (regression for the live-STT crash) ---
+       /// The live path previously crashed inside AVAudioFile.write; it now writes
+       /// a pure byte-level 16-bit PCM WAV. Verify the header + sample bytes.
+      @MainActor
+      func testWriteWAV16ProducesValidHeader() throws {
+            let url = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("vb-writeWAV16-\(UUID().uuidString).wav")
+            try? FileManager.default.removeItem(at: url)
+          // 0.5 s at 16 kHz -> 8000 samples
+           let samples = (0..<8000).map { Float(sin(Double($0) * 0.01)) * 0.25 }
+            try StreamingSttController.writeWAV16(samples, to: url)
+            let data = try Data(contentsOf: url)
+
+            // RIFF / WAVE header
+           XCTAssertEqual(Array(data[0..<4]), Array("RIFF".utf8))
+           XCTAssertEqual(data.count, 44 + 8000 * 2)           // 44-byte header + 16-bit PCM
+           XCTAssertEqual(Array(data[8..<12]), Array("WAVE".utf8))
+           XCTAssertEqual(Array(data[12..<16]), Array("fmt ".utf8))
+            XCTAssertEqual(Array(data[36..<40]), Array("data".utf8))
+
+            // PCM / mono / 16 kHz / 16-bit
+           func u16(_ off: Int) -> UInt16 {
+             UInt16(data[off]) | (UInt16(data[off + 1]) << 8) }
+            func u32(_ off: Int) -> UInt32 {
+              UInt32(data[off]) | (UInt32(data[off + 1]) << 8)
+             | (UInt32(data[off + 2]) << 16) | (UInt32(data[off + 3]) << 24) }
+           XCTAssertEqual(u16(20), 1)         // audio format = PCM
+           XCTAssertEqual(u16(22), 1)         // mono
+           XCTAssertEqual(u32(24), 16000)     // sample rate
+           XCTAssertEqual(u16(34), 16)        // bits per sample
+           }
+       }
