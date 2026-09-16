@@ -1,5 +1,6 @@
 import Foundation
 import VoiceBridgeCore
+import AVFoundation
 
 /// voicebridge-cli — a headless demo that exercises VoiceBridgeCore so you can
 /// see the STT→TTS pipeline work *before* wiring the SwiftUI app. Not shipped in
@@ -122,53 +123,74 @@ struct Main {
           }
         }
 
-       // MARK: - helpers
-    static func runPing() {
+// MARK: - helpers
+    // Findings 4 & 5: binary discovery goes through one `BinaryLocator` (not the
+    // copy-pasted checks the CLI used to roll here), and we surface microphone
+    // TCC status explicitly instead of letting AVAudioEngine emit an opaque error.
+    static let locator = BinaryLocator()
+
+     static func runPing() {
+        let roots = ModelPaths.fromEnvironment()
         print("VoiceBridge engine & model availability:")
         print("  STT  whisper-cli : \(whisperAvailable())")
-        print("  TTS  piper       : \(piperAvailable())")
-        print("  TTS  edge-tts    : \(edgeAvailable())")
+        print("  TTS  piper        : \(piperAvailable())")
+        print("  TTS  edge-tts     : \(edgeAvailable())")
         print("  TTS  system (AVSpeech): always available")
-        print("  models root : \(ModelPaths.root.path)")
+        print("  models root   : \(roots.root.path)")
+        print("  microphone    : \(micPermissionStatus())")
         if !whisperAvailable() {
-            print("\nHint: `brew install whisper-cpp` then set WHISPER_CLI, or run scripts/fetch-whisper-turbo.sh.")
-         }
+             print("\nHint: `brew install whisper-cpp` then set WHISPER_CLI, or run scripts/fetch-whisper-turbo.sh.")
+              }
         if !piperAvailable() {
-            print("Hint: `scripts/install-piper.sh` to enable Piper (offline TTS).")
-           }
-     }
-
-    private static func onPath(_ name: String) -> Bool {
-        Shell.pathLookup(name) != nil
+           print("Hint: `scripts/install-piper.sh` to enable Piper (offline TTS).")
+             }
+         if micPermissionStatus().contains("denied") || micPermissionStatus().contains("notDetermined") {
+            print("Hint: grant microphone access in System Settings > Privacy & Security > Microphone.")
+          }
        }
-    private static func whisperAvailable() -> Bool {
-        if let p = ProcessInfo.processInfo.environment["WHISPER_CLI"],
-           FileManager.default.isExecutableFile(atPath: p) { return true }
-        for c in ["/opt/homebrew/opt/whisper-cpp/bin/whisper-cli",
-                  "/usr/local/opt/whisper-cpp/bin/whisper-cli"]
-                 where FileManager.default.isExecutableFile(atPath: c) {
-            return true
-            }
-        return onPath("whisper-cli")
-        }
-    private static func piperAvailable() -> Bool {
+
+        // All discovery routes through the single locator (Finding 4).
+       static func whisperAvailable() -> Bool {
+       if let p = ProcessInfo.processInfo.environment["WHISPER_CLI"],
+             FileManager.default.isExecutableFile(atPath: p) { return true }
+        return locator.isAvailable("whisper-cli")
+          }
+     static func piperAvailable() -> Bool {
         if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_PIPER"],
-           FileManager.default.isExecutableFile(atPath: p) { return true }
-        return onPath("piper")
-        }
-    private static func edgeAvailable() -> Bool {
+             FileManager.default.isExecutableFile(atPath: p) { return true }
+        return locator.isAvailable("piper")
+       }
+    static func edgeAvailable() -> Bool {
         if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_EDGE_TTS"],
-           FileManager.default.isExecutableFile(atPath: p) { return true }
-        return onPath("edge-tts")
+             FileManager.default.isExecutableFile(atPath: p) { return true }
+        return locator.isAvailable("edge-tts")
        }
 
-     private static func printMenu() {
+        /// Missing 5: report microphone TCC status explicitly on a fresh terminal,
+        /// where an unsigned binary is silently denied and AVAudioEngine's failure is
+       /// otherwise unintelligible.
+    static func micPermissionStatus() -> String {
+         #if canImport(AVFoundation)
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
+        case .authorized:      return "authorized"
+        case .denied:          return "DENIED — grant it in System Settings > Privacy & Security > Microphone"
+        case .notDetermined:   return "notDetermined — will prompt on first use"
+        case .restricted:      return "restricted by policy"
+        @unknown default:      return "unknown"
+         }
+        #else
+        return "n/a (no AVFoundation)"
+         #endif
+      }
+
+       private static func printMenu() {
         print("""
-             voicebridge-cli — run STT / TTS without opening the GUI
-              ----------------
-             stt   <audio> [lang] [model]    e.g. `stt out.wav en large-v3-turbo`
-             tts   --text "…" [--voice V] [--engine piper|system|edgeTTS|kokoro]
-             ping                           show engine + model availability
-             """)
-       }
-}
+                 voicebridge-cli -- run STT / TTS without opening the GUI
+                 stt   <audio> [lang] [model]   e.g. `stt out.wav en large-v3-turbo`
+                 tts   --text "..." [--voice V] [--engine piper|system|edgeTTS|kokoro]
+                 ping                            show engine, model, & mic availability
+                 help                            this menu
+                """)
+        }
+    }

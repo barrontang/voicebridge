@@ -15,3 +15,11 @@ jobs:
         run: swift build -c release
       - name: Swift Test
         run: swift test
+       - name: No printf/`print(` in Core (Finding 5)
+        # Diagnostic output must go through os.Logger (VBLog); nothing in Core
+        # may write to stdout except the CLI's explicit user-facing path.
+        run: |
+          if grep -rn 'print(' Sources/VoiceBridgeCore --include='*.swift' \
+              | grep -v '/VBLog.swift' | grep -v '///'; then
+            echo "::error::Core writes to stdout; route diagnostics through VBLog."; exit 1
+          fi

@@ -9,10 +9,10 @@ public enum Pipeline {
       public static func runWithStdin(input: String,
                                        at argv: [String],
                                        workingDirectory: String? = nil,
-                                       timeout: TimeInterval? = nil) throws {
+                                       timeout: TimeInterval? = nil) async throws {
         guard !argv.isEmpty else {
             throw VoiceError.binaryNotFound(component: "(empty)", hint: "No argv provided.")
-              }
+               }
 
         let process = Process()
         let outPipe = Pipe()
@@ -22,65 +22,72 @@ public enum Pipeline {
         process.executableURL = URL(fileURLWithPath: argv[0])
         process.arguments = Array(argv.dropFirst())
         process.standardInput = inPipe
-        process.standardOutput = outPipe        // engines write audio to --output_file
+        process.standardOutput = outPipe
         process.standardError = errPipe
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
-             }
+              }
 
-          // Drain both pipes concurrently so the child can't block on a full
-          // buffer while we wait for termination. stdout is discarded (engines
-          // write audio to a file); stderr is captured for error messages.
         let drain = DispatchGroup()
         var capturedErr = Data()
 
         drain.enter()
         DispatchQueue.global().async {
-                _ = outPipe.fileHandleForReading.readDataToEndOfFile()
+                 _ = outPipe.fileHandleForReading.readDataToEndOfFile()
                  drain.leave()
-                 }
+                  }
 
         drain.enter()
         DispatchQueue.global().async {
                 let d = errPipe.fileHandleForReading.readDataToEndOfFile()
                  withLock { capturedErr = d }
                  drain.leave()
-                 }
+                  }
 
         let watch = Shell.TimeoutWatch()
         var timer: DispatchSourceTimer?
 
-        do {
-            try process.run()
-            timer = Shell.armTimeout(process, after: timeout, watch: watch)
-                } catch {
+        // Missing 2: if the calling Task is cancelled (Stop / quit / app close),
+        // terminate the child instead of orphaning it for the full engine run.
+        _ = try await withTaskCancellationHandler {
+             do {
+                try process.run()
+                timer = Shell.armTimeout(process, after: timeout, watch: watch)
+                 } catch {
+                drain.wait()
+                let errText = withLockedString { String(data: capturedErr, encoding: .utf8) ?? "(no stderr)" }
+                throw VoiceError.binaryNotFound(
+                    component: argv[0],
+                    hint: "run() failed: \(error)\n\(errText)")
+                 }
+
+                // Write stdin, then close so the child sees EOF (crucial for Piper).
+            let handle = inPipe.fileHandleForWriting
+            do { try handle.write(contentsOf: Data(input.utf8)) } catch {}
+            try? handle.close()
+
+            process.waitUntilExit()
+            timer?.cancel()
             drain.wait()
-            let errText = withLockedString { String(data: capturedErr, encoding: .utf8) ?? "(no stderr)" }
-            throw VoiceError.binaryNotFound(
-                component: argv[0],
-                hint: "run() failed: \(error)\n\(errText)")
-                }
+            let status = process.terminationStatus
+            let errText = withLockedString { String(data: capturedErr, encoding: .utf8) ?? "" }
 
-           // Write stdin, then close so the child sees EOF (crucial for Piper).
-        let handle = inPipe.fileHandleForWriting
-        do { try handle.write(contentsOf: Data(input.utf8)) } catch {}
-        try? handle.close()
-
-        process.waitUntilExit()
-        timer?.cancel()
-        drain.wait()
-        let status = process.terminationStatus
-        let errText = withLockedString { String(data: capturedErr, encoding: .utf8) ?? "" }
-
-           // A timeout kill means the engine hung — surface it distinctly.
-        if watch.wasTerminated {
-            throw VoiceError.processTimeout(component: argv[0],
-                                           seconds: timeout ?? -1)
-            }
-        if status != 0 {
-            throw VoiceError.processFailed(component: argv[0], status: status, stderr: errText)
-            }
-          }
+                // A timeout kill means the engine hung — surface it distinctly.
+            if watch.wasTerminated {
+                throw VoiceError.processTimeout(component: argv[0],
+                                               seconds: timeout ?? -1)
+             }
+            if Task.isCancelled {
+                throw CancellationError()
+             }
+            if status != 0 {
+                throw VoiceError.processFailed(component: argv[0], status: status, stderr: errText)
+             }
+                  } onCancel: {
+                     // `terminate()` is a no-op on an already-exited child.
+                  process.terminate()
+                       }
+         }
 
           // Tiny lock so the captured stderr can be read across threads safely.
     private static let lock = NSLock()

@@ -57,24 +57,37 @@ public enum Shell {
                                              hint: "run() failed: \(error). stderr:\n\(stderrText)")
          }
 
-        var out = ""
-        var err = ""
-        do { out = try await stdoutTask.value } catch {}
-        do { err = try await stderrTask.value } catch {}
+          // Missing 2: honor caller cancellation. Without this, a Stop / app-quit
+          // leaves the engine (e.g. whisper on a 30-min file) running to
+          // completion — an orphan process. `onCancel` terminates the child; the
+          // pipes are already being drained on their own tasks.
+        let collected = try await withTaskCancellationHandler {
+            var out = ""
+            var err = ""
+            do { out = try await stdoutTask.value } catch {}
+            do { err = try await stderrTask.value } catch {}
 
-        process.waitUntilExit() // terminates cleanly now that pipes are drained
-        timer?.cancel()
-        let status = process.terminationStatus
+            process.waitUntilExit() // terminates cleanly now that pipes are drained
+            timer?.cancel()
+            let status = process.terminationStatus
 
-         // A timeout kill is a failure even though SIGTERM exits non-zero.
-        if watch.wasTerminated {
-            throw VoiceError.processTimeout(component: binary,
-                                            seconds: timeout ?? -1)
-         }
-        if status != 0 {
-            throw VoiceError.processFailed(component: binary, status: status, stderr: err)
-         }
-        return Result(stdout: out, stderr: err, status: status)
+              // A timeout kill is a failure even though SIGTERM exits non-zero.
+            if watch.wasTerminated {
+                throw VoiceError.processTimeout(component: binary,
+                                                seconds: timeout ?? -1)
+               }
+            if status != 0 {
+                throw VoiceError.processFailed(component: binary, status: status, stderr: err)
+               }
+            return Result(stdout: out, stderr: err, status: status)
+                } onCancel: {
+                  // `terminate()` is a no-op on an already-exited child.
+                process.terminate()
+                stdoutTask.cancel()
+                stderrTask.cancel()
+                     }
+
+        return collected
      }
 
      /// Reads a pipe to EOF on a background queue.

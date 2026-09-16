@@ -197,12 +197,16 @@ struct ContentView: View {
           .onAppear {
             ttsConfig.scan()
             Playback.assumesRunningLoop = true
-            sttModel = ContentView.availableSttModel()
+            applySttModel(ttsConfig.selectedSttModel)
             if sttModel == nil {
                 sttStatus = "No whisper model on disk - run scripts/fetch-whisper-turbo.sh."
              } else {
                 sttStatus = "Ready."
              }
+         }
+         // Re-apply when the Settings STT model changes.
+          .onChange(of: ttsConfig.selectedSttModel) {
+            applySttModel(ttsConfig.selectedSttModel)
          }
     }
 
@@ -367,7 +371,7 @@ struct ContentView: View {
 
      @MainActor
      private func startCapture(voice: SttModel) {
-        let dir = ModelPaths.cacheDir
+        let dir = ttsConfig.paths.cacheDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("mic-\(UUID().uuidString).wav")
         do {
@@ -388,7 +392,7 @@ struct ContentView: View {
         // Capture the written WAV URL *from the binding* before we nil it out.
         // (This was the "No audio to transcribe" bug: reading `mic?.writtenURL`
         //  after setting `mic = nil` always fell back to a non-existent path.)
-        var audioURL = ModelPaths.cacheDir.appendingPathComponent("last-mic.wav")
+        var audioURL = ttsConfig.paths.cacheDir.appendingPathComponent("last-mic.wav")
         if let cap = mic {
             audioURL = cap.writtenURL   // mic's outputPath, flushed in stop()
             cap.stop()
@@ -462,9 +466,23 @@ struct ContentView: View {
      /// First whisper model physically present on disk (preferred order).
     static func availableSttModel() -> SttModel? {
         for m in SttModel.allCases {
-            let url = ModelPaths.whisperDir.appendingPathComponent(m.ggmlFilename)
+            let url = ModelPaths.fromEnvironment().whisperDir.appendingPathComponent(m.ggmlFilename)
             if FileManager.default.fileExists(atPath: url.path) { return m }
         }
         return nil
      }
+
+       // Resolve the model to use: prefer the Settings choice when it is on
+       // disk, else the first whisper model present, else nil. Also sync the
+       // live stream's model when it is idle.
+      @MainActor private func applySttModel(_ requested: SttModel) {
+        let onDisk = ttsConfig.paths.whisperDir
+                 .appendingPathComponent(requested.ggmlFilename)
+        let chosen = FileManager.default.fileExists(atPath: onDisk.path)
+                 ? requested
+                            : ContentView.availableSttModel()
+        sttModel = chosen
+        // The live stream keeps its own model; sync it when not in a session.
+        stream.useModel(chosen ?? .tiny)
+       }
 }

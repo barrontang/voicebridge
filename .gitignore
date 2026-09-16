@@ -12,6 +12,9 @@ models/
 .DS_Store
 *.swp
 
+# Local-only files (never commit)
+weibo.md
+
 # Python (Piper runtime lives in the user env, not the repo)
 __pycache__/
 *.pyc

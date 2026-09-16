@@ -165,19 +165,43 @@ final class CoreTests: XCTestCase {
            XCTAssertEqual(u16(34), 16)        // bits per sample
            }
 
-         // --- StreamingSttController.deltaSince (live-append, not rewrite) ---
-        /// A fresh tick appends only the NEW words; a no-change tick appends nothing.
-       @MainActor
-     func testDeltaSinceAppendsNewWordsOnly() {
-          // First tick: old empty -> whole thing is new.
-      XCTAssertEqual(StreamingSttController.deltaSince("", full: "hello"), "hello")
-          // Second tick: same text -> nothing new.
-       XCTAssertEqual(StreamingSttController.deltaSince("hello", full: "hello"), "")
-          // Third tick: a longer full -> only the tail after the old prefix.
-      XCTAssertEqual(StreamingSttController.deltaSince("hello", full: "hello world"), "world")
-          // A drifted prefix should still yield only the remainder.
-       XCTAssertEqual(StreamingSttController.deltaSince("hello wor", full: "hello worg"), "g")
-          // Empty full -> empty.
-      XCTAssertEqual(StreamingSttController.deltaSince("hello xxx", full: ""), "")
-        }
+           // --- StreamingSttController.appendDeduped (live-append + overlap dedup) ---
+            // A fresh tick appends the new words; a fully re-echoed (overlap)
+            // tick changes nothing.
+          @MainActor
+         func testAppendDedupedAppendsNewWordsOnly() {
+             // First tick: empty accumulated -> whole segment is new.
+             XCTAssertEqual(StreamingSttController.appendDeduped("", segment: "hello"), "hello")
+             // The overlap re-echoes exactly what we have -> append nothing.
+             XCTAssertEqual(StreamingSttController.appendDeduped("hello", segment: "hello"), "hello")
+             // A window that continues the phrase appends only the new tail.
+             XCTAssertEqual(StreamingSttController.appendDeduped("hello", segment: "hello world"), "hello world")
+             // Empty segment leaves the transcript untouched.
+             XCTAssertEqual(StreamingSttController.appendDeduped("hello world", segment: ""), "hello world")
+          }
+
+          // --- Regression: the OLD longest-common-prefix diff leaked stray
+          // fragments when an earlier word was re-worded (e.g. "recognize speech"
+          // -> "recognize speeches" left a dangling "es"). The committed-window
+          // approach never re-transcribes old audio, and appendDeduped drops the
+          // re-fed overlap, so there is no fragment leak.
+          @MainActor
+         func testLiveTranscriptHasNoOverlapGarble() {
+             // The 0.4 s overlap re-feeds "speech"; dedup must drop that echo.
+             XCTAssertEqual(
+                 StreamingSttController.appendDeduped("recognize speech", segment: "speech and text"),
+                  "recognize speech and text")
+
+             // A multi-word overlap is also stripped contiguously.
+             XCTAssertEqual(
+                 StreamingSttController.appendDeduped("a b c d", segment: "c d new words"),
+                  "a b c d new words")
+
+             // Feeding overlapping windows back-to-back must never double-count.
+             var transcript = ""
+             transcript = StreamingSttController.appendDeduped(transcript, segment: "the quick brown")
+             transcript = StreamingSttController.appendDeduped(transcript, segment: "brown fox jumps")
+             transcript = StreamingSttController.appendDeduped(transcript, segment: "jumps over")
+             XCTAssertEqual(transcript, "the quick brown fox jumps over")
+          }
        }

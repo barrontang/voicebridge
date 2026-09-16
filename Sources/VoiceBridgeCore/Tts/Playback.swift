@@ -49,11 +49,11 @@ public enum Playback {
         stopAll() // replace anything already sounding
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            print("[Playback] file not found: \(url.path)")
+            VBLog.capture.warning("file not found: \(url.path)")
             return
                }
         guard let player = try? AVAudioPlayer(contentsOf: url) else {
-            print("[Playback] could not open \(url.path)")
+            VBLog.capture.warning("could not open \(url.path)")
             return
                }
         player.volume = 1.0
@@ -65,12 +65,12 @@ public enum Playback {
             // keep it alive (it lives in `current`), but do NOT re-enter the
             // loop (that freezes the UI).
         if assumesRunningLoop {
-             print("[Playback] queued \(url.lastPathComponent) on running loop")
+             VBLog.capture.info("queued \(url.lastPathComponent) on running loop")
               return
                  }
 
              // CLI: no running loop — spin it so playback finishes before exit.
-        print("[Playback] playing \(url.lastPathComponent)")
+        VBLog.capture.info("playing \(url.lastPathComponent)")
         while player.isPlaying {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }

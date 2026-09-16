@@ -10,6 +10,8 @@ import AVFoundation
 /// and `synthesize` returns its (nonexistent) output path as a sentinel — the
 /// orchestrator sees `producesAudioFile == false` and skips file playback,
 /// instead letting AVSpeech deliver audio while a runloop spin keeps it alive.
+    // SAFETY (@unchecked Sendable): all stored properties are immutable `let`s.
+    // A future mutable cache must be an `actor` or locked, not a bare var.
 public final class SystemVoiceBackend: TTSBackend, @unchecked Sendable {
 
          /// In-place engine — no audio file is produced.
