@@ -1,6 +1,7 @@
 import Foundation
 import VoiceBridgeCore
 import AVFoundation
+import Darwin
 
 /// voicebridge-cli — a headless demo that exercises VoiceBridgeCore so you can
 /// see the STT→TTS pipeline work *before* wiring the SwiftUI app. Not shipped in
@@ -9,6 +10,8 @@ import AVFoundation
 /// Usage:
 ///    voicebridge-cli stt   <audio> [lang] [model]
 ///    voicebridge-cli tts   --text "hello" [--voice NAME] [--engine piper|system|edgeTTS|kokoro]
+///    voicebridge-cli tts      --stdin            read text to speak from STDIN
+///    <agent output> | voicebridge-cli tts        speak piped text (works with offline engines)
 ///    voicebridge-cli ping                  // report engine + model availability
 ///
 /// Examples:
@@ -69,12 +72,24 @@ struct Main {
         var voice: String? = nil
         var engine: TTSMode = .piper
         var noPlay = false
+        var useStdin = false
+        var textGiven = false
 
         var it = args.makeIterator()
         while let tok = it.next() {
             switch tok {
-            case "--text":  text = it.next() ?? text
+            case "--text":
+                   let v = it.next()
+                    if v == nil || v == "-" {
+                            // `-` (or no value): read text from STDIN so an agent's
+                            // output can be piped in — `... | voicebridge-cli tts`.
+                         useStdin = true
+                           } else {
+                           text = v!; textGiven = true
+                                 }
             case "--voice": voice = it.next()
+            case "--stdin": useStdin = true
+            case "-":       useStdin = true
             case "--engine":
                 if let raw = it.next() {
                     // Accept either a rawValue or a short alias (piper/kokoro/edge/system).
@@ -96,15 +111,26 @@ struct Main {
               }
            }
 
+        // Resolve the text to speak:
+        //    * `--stdin` / `-` / `--text -` reads STDIN (agent-piped output);
+        //    * a bare pipe with no flag speaks whatever is piped in;
+        //    * an interactive terminal with no text keeps the demo string.
+        if useStdin { text = readAllStdin() }
+        else if !textGiven && !isInteractiveStdin() { text = readAllStdin() }
+
+          // A call that expected a pipe but nothing arrived should not hear the demo.
+        if !textGiven && (useStdin || !isInteractiveStdin()),
+           text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+             print("[no text supplied on --stdin]"); return
+              }
+
         print("→ speaking \(text.count) chars via \(engine.rawValue); voice=\(voice ?? "default")")
       if engine == .edgeTTS {
-          // P1: the CLI has no UI, so warn on stderr that the input transits
-          // Microsoft's servers rather than staying on-device.
-         // P1: the CLI has no UI, so warn on stderr that the input transits
-         // Microsoft's servers rather than staying on-device.
+           // P1: the CLI has no UI, so warn on stderr that the input transits
+           // Microsoft's servers rather than staying on-device.
          let warn = "[privacy] \(engine.rawValue) is online: the input text is sent to a Microsoft gateway by edge-tts and is not kept on-device.\n"
          FileHandle.standardError.write(Data(warn.utf8))
-            }
+             }
         let cfg = TTSConfigManager()
         cfg.selectedMode = engine
         cfg.selectedModelFile = voice
@@ -132,6 +158,18 @@ struct Main {
         }
 
 // MARK: - helpers
+
+       /// Read every byte off STDIN without blocking the terminal case —
+       /// readDataToEndOfFile returns immediately at EOF.
+    static func readAllStdin() -> String {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        return String(decoding: data, as: UTF8.self)
+       }
+
+       /// True when STDIN is a terminal, i.e. the user did not pipe text in.
+    static func isInteractiveStdin() -> Bool {
+        isatty(FileHandle.standardInput.fileDescriptor) == 1
+       }
     // Findings 4 & 5: binary discovery goes through one `BinaryLocator` (not the
     // copy-pasted checks the CLI used to roll here), and we surface microphone
     // TCC status explicitly instead of letting AVAudioEngine emit an opaque error.
@@ -196,6 +234,7 @@ struct Main {
         print("""
                  voicebridge-cli -- run STT / TTS without opening the GUI
                  stt   <audio> [lang] [model]   e.g. `stt out.wav en large-v3-turbo`
+                       `... | voicebridge-cli tts` [--engine ...]  speak piped text
                  tts   --text "..." [--voice V] [--engine piper|system|edgeTTS|kokoro]
                  ping                            show engine, model, & mic availability
                  help                            this menu
