@@ -31,6 +31,10 @@ public final class EdgeTTSBackend: TTSBackend, @unchecked Sendable {
 
      public var displayName: String { "Edge TTS (online, Microsoft voices)" }
 
+         /// The text for this engine is synthesized on Microsoft
+         /// servers: it leaves the device. Surface a privacy warning when used.
+    public var requiresNetwork: Bool { true }
+
           /// edge-tts needs an installed binary AND a network connection; we gate on
          /// the binary so "offline" is an explicit config choice, not a silence.
     public func isAvailable() -> Bool {

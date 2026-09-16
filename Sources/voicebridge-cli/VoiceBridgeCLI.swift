@@ -97,6 +97,14 @@ struct Main {
            }
 
         print("→ speaking \(text.count) chars via \(engine.rawValue); voice=\(voice ?? "default")")
+      if engine == .edgeTTS {
+          // P1: the CLI has no UI, so warn on stderr that the input transits
+          // Microsoft's servers rather than staying on-device.
+         // P1: the CLI has no UI, so warn on stderr that the input transits
+         // Microsoft's servers rather than staying on-device.
+         let warn = "[privacy] \(engine.rawValue) is online: the input text is sent to a Microsoft gateway by edge-tts and is not kept on-device.\n"
+         FileHandle.standardError.write(Data(warn.utf8))
+            }
         let cfg = TTSConfigManager()
         cfg.selectedMode = engine
         cfg.selectedModelFile = voice

@@ -11,6 +11,7 @@ models/
 # Editor / OS noise
 .DS_Store
 *.swp
+.vscode/
 
 # Local-only files (never commit)
 weibo.md

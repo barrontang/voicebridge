@@ -21,10 +21,19 @@ public protocol TTSBackend: Sendable {
     func isAvailable() -> Bool
            /// Human label shown in the UI picker.
     var displayName: String { get }
+
+        /// True when the engine sends the *text* off-device to a remote
+        /// service (e.g. edge-tts calls a Microsoft gateway over WebSockets).
+        /// Offline engines return `false`; the orchestrator uses this to warn
+        /// the user that their words are leaving the machine before speaking.
+    var requiresNetwork: Bool { get }
 }
 
 public extension TTSBackend {
         /// File-producing engines (piper / kokoro / edge-tts) are the default.
         /// In-place engines override this to `false`.
     var producesAudioFile: Bool { true }
+
+        /// Network-bound engines (edge-tts) override this to `true`.
+    var requiresNetwork: Bool { false }
 }

@@ -33,8 +33,22 @@ public struct TTSManager {
 
     private let config: TTSConfigManager
 
-     public init(config: TTSConfigManager) {
+        /// P1 of the review: the cache dir is reclaimed after each write so it
+        /// can't grow without bound. Inject the limits, or disable via
+        /// `pruneAfterWrite: false`.
+    private let cacheLimits: CacheGuardian.Limits
+    private let pruneAfterWrite: Bool
+
+
+    /// The `cacheLimits` / `pruneAfterWrite` args default to a sensible "keep
+    /// ~1k files / 2 GiB / 30 days" policy, so existing `TTSManager(config:)`
+    /// call sites keep working unchanged.
+    public init(config: TTSConfigManager,
+                cacheLimits: CacheGuardian.Limits = .init(),
+                pruneAfterWrite: Bool = true) {
         self.config = config
+        self.cacheLimits = cacheLimits
+        self.pruneAfterWrite = pruneAfterWrite
             }
 
            /// Speaks `text` using `mode` (defaults to the UI selection). Falls
@@ -71,11 +85,30 @@ public struct TTSManager {
               }
 
              // Cache slot for file-producing engines (AVSpeech ignores this).
+
+             // Privacy: if the engine that actually runs is network-bound
+             // (edge-tts), tell the user their text is transiting Microsoft
+             // servers. This is the P1 "loudly warn it's online" item.
+            if engine.requiresNetwork {
+                 VBLog.tts.warning("privacy: \"\(engine.displayName)\" is online — the input")
+                 VBLog.tts.warning("text is sent to a remote service by edge-tts, not kept on-device;")
+                 VBLog.tts.warning("switch to a local engine (Piper/Kokoro/System) for offline TTS.")
+                 }
         let out = env.cacheDir
                      .appendingPathComponent(UUID().uuidString + ".wav")
         let url = try await engine.synthesize(text: text, voice: resolvedVoice, outputPath: out)
         VBLog.tts.info("wrote \(url.lastPathComponent) via \(engine.displayName)")
         if fellBack { VBLog.tts.notice("fell back to \(engine.displayName)") }
+
+                // P1: reap the cache dir so it can't grow unbounded. File-producing
+               // engines wrote to `out` just now; a prune of a fresh/empty dir is a
+               // harmless no-op, and the just-written file is the newest so it survives.
+        if pruneAfterWrite, engine.producesAudioFile {
+             let outcome = CacheGuardian().prune(directory: env.cacheDir, limits: cacheLimits)
+            if !outcome.isEmpty {
+                VBLog.tts.info("cache prune: removed \(outcome.removedCount) file(s), \(outcome.removedBytes) B")
+                  }
+                }
 
         guard play else {
             return SpeakResult(url: url, engineName: engine.displayName,
