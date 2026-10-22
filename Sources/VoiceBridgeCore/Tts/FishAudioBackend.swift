@@ -59,6 +59,14 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
         self.isConfigured = isConfigured
     }
 
+    /// The engine when no server is configured: it reports itself as
+    /// unavailable, so the manager falls back to the built-in voice.
+    public static func unconfigured() -> FishAudioBackend {
+        FishAudioBackend(baseURL: URL(string: "http://127.0.0.1:8000")
+                            ?? URL(fileURLWithPath: "/"),
+                          isConfigured: false)
+    }
+
     /// The engine configured through the environment (nil when there is no
     /// server to talk to).
     public static func fromEnvironment(

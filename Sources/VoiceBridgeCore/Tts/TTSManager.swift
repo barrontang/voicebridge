@@ -219,8 +219,7 @@ public struct TTSManager {
             if let configured = FishAudioBackend.fromEnvironment() {
                 return configured
                 }
-            return FishAudioBackend(baseURL: URL(string: "http://127.0.0.1:8000")!,
-                                    isConfigured: false)
+            return FishAudioBackend.unconfigured()
            }
      }
 }
