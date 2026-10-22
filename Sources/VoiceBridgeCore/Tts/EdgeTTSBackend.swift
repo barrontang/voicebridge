@@ -72,10 +72,21 @@ public final class EdgeTTSBackend: TTSBackend, @unchecked Sendable {
                        "--voice", voiceName,
                        "--file", textFile.path,
                        "--write-media", media.path]
-        try await Pipeline.runWithStdin(input: "", at: args, workingDirectory: nil, timeout: 120)
+        // The child is a Python program: on failure it prints a stack trace
+        // (on stdout *or* stderr). We read both and turn them into one
+        // actionable line.
+        let outcome = try await Pipeline.runWithStdinRaw(input: "", at: args,
+                                                          workingDirectory: nil,
+                                                          timeout: 120)
+        if outcome.status != 0 {
+            throw VoiceError.onlineServiceRejected(
+                engine: "edge-tts",
+                reason: EdgeTTSBackend.diagnose(outcome.stderr + "\n" + outcome.stdout))
+            }
         guard FileManager.default.fileExists(atPath: media.path) else {
-            throw VoiceError.processFailed(component: "edge-tts", status: -1,
-                                           stderr: "No audio produced (no network?).")
+            throw VoiceError.onlineServiceRejected(
+                engine: "edge-tts",
+                reason: "no audio came back (network problem?)")
              }
         // edge-tts may write `.mp3` even when asked for another extension.
         if media != outputPath {
@@ -84,4 +95,37 @@ public final class EdgeTTSBackend: TTSBackend, @unchecked Sendable {
         }
         return outputPath
          }
+
+    /// Turn the child's stack trace into one short, actionable line.
+    ///
+    /// The classic failure is Microsoft's endpoint refusing the WebSocket
+    /// handshake with a 403 because the installed `edge-tts` is too old - the
+    /// fix is a one-line upgrade, and the user should not have to read a
+    /// Python traceback to find that out.
+    static func diagnose(_ stderr: String) -> String {
+        let text = stderr.lowercased()
+        if text.contains("wsserverhandshakeerror")
+            || text.contains("invalid response status")
+            || text.contains("403") {
+            return "Microsoft's service refused the request (HTTP 403). "
+                + "The installed edge-tts client is too old - upgrade it with "
+                + "`pipx upgrade edge-tts` (or `pip install -U edge-tts`)."
+            }
+        if text.contains("timed out") || text.contains("timeout") {
+            return "the request to Microsoft's service timed out."
+            }
+        if text.contains("connection") || text.contains("network")
+            || text.contains("unreachable") || text.contains("dns") {
+            return "could not reach Microsoft's service - check the network."
+            }
+        // Fall back to the last meaningful line of the trace.
+        let lines = stderr
+            .split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("Traceback") && !$0.hasPrefix("File ") }
+        if let last = lines.last {
+            return String(last.prefix(160))
+            }
+        return "the service refused the request."
+        }
 }

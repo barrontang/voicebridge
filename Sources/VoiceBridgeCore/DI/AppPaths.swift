@@ -33,8 +33,16 @@ public enum AppPaths {
       }
 
         /// The canonical settings file.
+    ///
+    /// `VOICEBRIDGE_CONFIG_PATH` overrides it - the escape hatch that keeps a
+    /// test (or a sandboxed run) from ever writing to the user's real
+    /// settings.
     public static func configURL() throws -> URL {
-        try supportDirectory().appendingPathComponent("config.json")
+        if let override = ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: override)
+            }
+        return try supportDirectory().appendingPathComponent("config.json")
       }
 
         /// The **legacy** settings location (before this fix): the per-user temp

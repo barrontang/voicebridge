@@ -57,10 +57,16 @@ final class TTSManagerTests: XCTestCase {
     }
 
     /// A config manager rooted in a throwaway directory.
+    ///
+    /// The settings file is a temp file too: without it the manager would
+    /// *persist* the throwaway root into the user's real
+    /// `~/Library/Application Support/VoiceBridge/config.json`.
     private func makeConfig() throws -> TTSConfigManager {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("vb-tts-tests-\(UUID().uuidString)")
-        let config = TTSConfigManager()
+        let settings = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("vb-tts-tests-\(UUID().uuidString).json")
+        let config = TTSConfigManager(persistURL: settings)
         config.configureRoot(root)
         return config
     }

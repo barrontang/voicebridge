@@ -83,6 +83,10 @@ public enum VoiceError: LocalizedError, Sendable {
     case insufficientDiskSpace(needed: Int64, available: Int64, at: String)
     // Finding 8: discard a download whose checksum doesn't match.
     case checksumMismatch(url: String, expected: String, actual: String)
+    // An online engine's service refused the request (usually an outdated
+    // client library). The reason is a short, actionable line - not the
+    // child's 60-line stack trace.
+    case onlineServiceRejected(engine: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -110,6 +114,8 @@ public enum VoiceError: LocalizedError, Sendable {
         case .checksumMismatch(let url, let expected, let actual):
             return "Downloaded model failed checksum at \(url): "
                 + "expected \(expected), got \(actual). The file was discarded."
+        case .onlineServiceRejected(let engine, let reason):
+            return "\(engine) could not reach its speech service: \(reason)"
         }
     }
 }

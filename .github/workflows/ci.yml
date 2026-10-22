@@ -24,6 +24,9 @@ jobs:
 
       - name: Swift Test
         run: swift test
+        env:
+          # Never touch a real settings file from a test run.
+          VOICEBRIDGE_CONFIG_PATH: ${{ runner.temp }}/voicebridge-test-config.json
 
       - name: No print( in Core (Finding 5)
         # Diagnostic output must go through os.Logger (VBLog); nothing in Core
@@ -32,6 +35,16 @@ jobs:
           if grep -rnE '\bprint[[:space:]]*\(' Sources/VoiceBridgeCore --include='*.swift' \
               | grep -v '/VBLog.swift' | grep -vE '^\S+:[0-9]+:[[:space:]]*///'; then
             echo "::error::Core writes to stdout; route diagnostics through VBLog."; exit 1
+          fi
+
+      - name: Tests never touch the real settings file
+        # A config manager built without an explicit settings file would
+        # persist into the user's ~/Library/Application Support - a test must
+        # never do that.
+        run: |
+          if grep -rn 'TTSConfigManager()' Tests --include='*.swift'; then
+            echo "::error::A test builds a config manager without an explicit settings file."
+            exit 1
           fi
 
       - name: No force-unwraps in Core

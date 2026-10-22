@@ -13,6 +13,26 @@ public enum Pipeline {
                                        at argv: [String],
                                        workingDirectory: String? = nil,
                                        timeout: TimeInterval? = nil) async throws {
+        let outcome = try await runWithStdinRaw(input: input,
+                                                at: argv,
+                                                workingDirectory: workingDirectory,
+                                                timeout: timeout)
+        if outcome.status != 0 {
+            throw VoiceError.processFailed(component: argv[0],
+                                           status: outcome.status,
+                                           stderr: outcome.stderr)
+            }
+        }
+
+      /// Run a child with stdin and return its raw outcome.
+      ///
+      /// A non-zero exit is *not* an error here: a caller that wants to read
+      /// the child's output (and decide what the failure means) gets both
+      /// streams back. Only a launch failure or a timeout throws.
+    public static func runWithStdinRaw(input: String,
+                                       at argv: [String],
+                                       workingDirectory: String? = nil,
+                                       timeout: TimeInterval? = nil) async throws -> ProcessOutcome {
         guard !argv.isEmpty else {
             throw VoiceError.binaryNotFound(component: "(empty)", hint: "No argv provided.")
                }
@@ -28,10 +48,6 @@ public enum Pipeline {
             throw VoiceError.processTimeout(component: argv[0],
                                            seconds: timeout ?? -1)
             }
-        if outcome.status != 0 {
-            throw VoiceError.processFailed(component: argv[0],
-                                           status: outcome.status,
-                                           stderr: outcome.stderr)
-            }
+        return outcome
         }
 }
