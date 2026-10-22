@@ -51,8 +51,18 @@ jobs:
       - name: Validate workflow YAML
         run: ruby -ryaml -e 'YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'
 
+      # actionlint ships a container action, which only runs on Linux - so
+      # the binary is fetched directly (pinned version) instead.
       - name: actionlint
-        uses: rhysd/actionlint@v1.7.12
+        run: |
+          VERSION=1.7.12
+          case "$(uname -m)" in
+            arm64) ARCH=darwin_arm64 ;;
+            *)     ARCH=darwin_x86_64 ;;
+          esac
+          curl -sSL "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_${ARCH}.tar.gz" \
+            | tar xz actionlint
+          ./actionlint
 
       - name: The version is in sync
         run: |
