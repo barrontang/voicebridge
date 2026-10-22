@@ -1,5 +1,5 @@
 import Foundation
-import SwiftUI
+import Combine
 import os
 
 /// Fixes the original PRD's bug:

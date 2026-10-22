@@ -1,11 +1,11 @@
 # Runbook
 
-Step-by-step: install the backends, run the CLI, and wire the GUI target.
+Step-by-step: install the backends, run the CLI, and ship the app.
 
 ## 0. Prerequisites
 
 - macOS 14+, Xcode 15+ command-line tools (`swift`, `swift test`).
-- `brew` for the optional engines.
+- `brew` for the optional engines (or use the in-app downloader).
 
 ## 1. STT — whisper.cpp
 
@@ -17,17 +17,20 @@ export WHISPER_CLI=/opt/homebrew/opt/whisper-cpp/bin/whisper-cli
 ```
 
 Model files land in `~/.voicebridge/models/tts/whisper/ggml-<model>.bin`
-(override the root with `VOICEBRIDGE_MODELS_MAP`).
+(override the root with `VOICEBRIDGE_MODELS_MAP`, or pick a folder in
+**Settings → Model folder**).
 
 > **Cross-version output.** `WhisperCliBackend` is version-agnostic. It runs
 > `whisper-cli` with `-otxt -oj` in an isolated temp CWD and reads the derived
 > `<input>.txt` / `<input>.json` files, parsing three known JSON shapes
 > (segment arrays, a flat object, and mixed `result`+`transcription`) for
-> detected language and duration. Builds without those flags fall back to stdout;
-> a non-zero exit caused *only* by an unrecognised flag is retried without it, so
-> genuine transcription errors still surface. Audio duration is measured from the
-> source file, because a model's `offsets.to` can report its ~30 s context window
-> rather than the true clip length.
+> detected language, duration **and per-segment timings**. Builds without those
+> flags fall back to stdout; a non-zero exit caused *only* by an unrecognised
+> flag is retried without it, so genuine transcription errors still surface.
+
+**No terminal?** Open the app → Settings → **Download models** → *Download*.
+The file is streamed into a `.partial` sidecar, verified, and renamed into
+place, so an interrupted download can never look like an installed model.
 
 ## 2. TTS — engines
 
@@ -35,84 +38,103 @@ Model files land in `~/.voicebridge/models/tts/whisper/ggml-<model>.bin`
 |---|---|---|---|
 | Built-in (AVSpeech) | — | ✅ | zero-setup fallback, always available |
 | Piper (DEFAULT) | `scripts/install-piper.sh` | ✅ | local ONNX, voices under `piper/voice/` |
-| Kokoro-82M | install a `kokoro` CLI | ✅ | local, heavy |
-| Edge TTS | `pip install edge-tts` | ❌ | online MS voices, best fidelity |
+| Kokoro-82M | install a `kokoro` CLI | ✅ | local, heavy (first run ~15 s) |
+| Edge TTS | `pip install edge-tts` | ❌ | online MS voices; the app asks before sending |
 
 Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`.
 
+> **Privacy.** Edge TTS is the only online engine. The app asks for
+> confirmation before the first send and shows a notice in the status line. The
+> text is handed to the engine through a private (0600) temp file, never on the
+> command line.
+
 > **Caveat (the built-in engine in a headless CLI).** `SystemVoiceBackend`
-> *speaks in place* via `AVSpeechSynthesizer`, which delivers on the main run
-> loop. In a long-lived GUI app that loop is already running, so it just plays.
-> In a short-lived process it can appear to "hang" because the process exits
-> before the utterance drains — that is the engine, not a bug in the pipeline.
-> For headless smoke tests, prefer a file-producing engine (`piper`, `edgeTTS`,
-> `kokoro`) with `--no-play`, or add a run-loop spin around the call.
+> speaks *in place* via `AVSpeechSynthesizer`, which delivers on the main run
+> loop. In a long-lived app that loop is already running, so it just plays. In
+> a short-lived process it can appear to "hang" because the process exits
+> before the utterance drains — the engine now has a deadline, so it fails
+> with a clear error instead of hanging. For headless smoke tests, prefer a
+> file-producing engine (`piper`, `edgeTTS`, `kokoro`) with `--no-play`.
 
 ## 3. Build and smoke test
 
 ```bash
 swift build -c release
 .build/release/voicebridge-cli ping                        # engine + model availability
-.build/release/voicebridge-cli stt  out.wav en large-v3-turbo
-.build/release/voicebridge-cli tts --text "你好, world" --voice zh_CN-xiaoyi-medium
+.build/release/voicebridge-cli stt  out.m4a en large-v3-turbo   # any format
+.build/release/voicebridge-cli transcribe --in ./inbox --out ./outbox
 .build/release/voicebridge-cli tts --text "hello" --engine piper --no-play
+.build/release/voicebridge-cli tts --text "hello" --engine system
+echo "piped text" | .build/release/voicebridge-cli tts --engine piper
 ```
 
 `stt` prints a transcript plus a metadata line: `audio=…s  factor=…x` when the
 clip length is known, otherwise `wallclock=…s` as a cost proxy.
 
+`transcribe` walks a folder, writes one `.txt` per audio file and reports
+`N transcribed, M failed` (one bad file never stops the batch).
+
 ## 4. Tests
 
 ```bash
-swift test        # 11 pure-logic tests: models, URL helpers, error formatting,
-                  # and cross-version whisper JSON parsing
+swift test                                        # 94 pure-logic tests, < 1 s
+VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 
-Audio/shell paths are integration-tested by `voicebridge-cli ping`/`stt`/`tts`
-(they need a mic and an installed binary), not unit tests.
+Audio/shell paths are integration-tested by `voicebridge-cli`
+(`ping`/`stt`/`tts`), not by the unit tests.
 
-## 5. transcode — resample extension point (AVAudioConverter)
+## 5. Audio input
 
-`AudioTranscoder.transcodeToWAV` handles the 16 kHz/mono fast path and throws for
-other shapes. To resample arbitrary sources stream-style (chunked, no whole-file
-load):
+Everything that enters the STT path is normalised to **16 kHz / mono / 16-bit
+PCM**:
 
 ```swift
-let inFmt   = try AVAudioFile(forReading: from).processingFormat
-let outFmt  = AudioFormats.targetFormat
+// Live: the router does it for you.
+let router = AudioInputRouter()
+let token = router.addSink { frame in
+    print(frame.samples.count, frame.startTime)   // 16 kHz mono frames
+}
+try router.start()
 
-// Convert sampleRate and channelCount in one pass; pull/push in frames.
-let converter = try AVAudioConverter(from: inFmt, to: outFmt)
-converter.requestData { _, inStatus, outStatus in
-      // pull from the input file, push to a fresh output file; loop until done.
-      _ = (inStatus, outStatus)
-    }
+// Files: the transcoder does it for you.
+try AudioTranscoder.transcodeToWAV(from: someMovie, to: scratchURL)
 ```
 
-Key points:
-- Convert **sample rate** and **channel count** together — `AVAudioConverter`
-  handles resampling and stereo→mono in one object.
-- Pull/push in **frames**, not the whole buffer, to keep memory flat for long
-  recordings.
-- Write with a fresh `AVAudioFile(forWriting: out, settings: AudioFormats.target)`.
+`AudioTranscoder` uses `AVAudioConverter` (proper anti-aliasing) and streams
+the result; a linear-interpolation fallback covers exotic formats.
 
-## 6. Mic capture
+## 6. The app
 
-```swift
-let cap = try MicrophoneCapture(outputURL: out)    // writes 16 kHz/mono/16-bit PCM
-await MicrophoneCapture.requestInputPermission { granted in /* ... */ }
-try cap.start(); /* ... */ cap.stop()
+```bash
+./scripts/make-app.sh release        # → Build/VoiceBridge.app
+open Build/VoiceBridge.app
 ```
 
-`AVAudioRecorder` writes the exact whisper shape, so no post-processing tap is
-needed for batch capture. For word-partial streaming, `installTap` on the input
-node instead (documented extension point in `MicrophoneCapture.swift`).
+The bundle is ad-hoc signed so the microphone prompt has a stable identity.
+The GUI is a *reference* shell — for a shipping build you would also want:
 
-## 7. GUI target
+* an **App Sandbox** with the microphone entitlement (note: an out-of-process
+  `whisper-cli` does not survive the sandbox — link whisper in-process, or
+  ship the binary as a bundled helper),
+* a **notarized** build (`xcrun notarytool` — see
+  `.github/workflows/release.yml` for the shape),
+* **model downloads inside the sandbox** (the `ModelDownloader` needs a
+  security-scoped bookmark for a user-chosen folder).
 
-`App/` holds three **reference** SwiftUI files (not part of the package). To ship
-the GUI:
+## 7. Settings file
 
-1. New macOS App target (Minimum = macOS 14).
-2. Copy `App/VoiceBridgeApp.swift`, `App/ContentView.swift`, `App/SettingsView.swift`.
-3. Add `VoiceBridgeCore` as an SPM dependency.
+`~/Library/Application Support/VoiceBridge/config.json`:
+
+```json
+{
+  "schemaVersion": 2,
+  "mode": "Piper (local, DEFAULT)",
+  "voice": "en_US-amy-medium",
+  "sttModel": "large-v3-turbo",
+  "root": "/Users/you/.voicebridge/models/tts"
+}
+```
+
+`schemaVersion` guards the file: an older record is migrated forward on load,
+and a file written by a **newer** build is read but never overwritten.
