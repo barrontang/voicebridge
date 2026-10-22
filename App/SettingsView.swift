@@ -16,6 +16,8 @@ import VoiceBridgeCore
 
 struct SettingsView: View {
         @ObservedObject var ttsConfig: TTSConfigManager
+     /// Drives the "download a model" rows.
+    @StateObject private var downloads = ModelDownloadController()
 
          /// A short human description of the currently-selected TTS engine.
      private var ttsEngineBlurb: String {
@@ -136,7 +138,41 @@ struct SettingsView: View {
                  }
              }   // end GROUP 2
 
-             // ── GROUP 3: MODEL FOLDER ─────────────────────────────
+             // ── GROUP 3: DOWNLOAD MODELS ──────────────────────────
+            Section {
+             Text("DOWNLOAD MODELS")
+                  .font(.caption).fontWeight(.bold)
+                  .foregroundStyle(.secondary)
+             Text("One click, no terminal. Downloads land in the model folder "
+                   + "below and are verified before they are moved into place.")
+                   .font(.caption)
+                  .foregroundStyle(.secondary)
+
+              ForEach(downloads.rows(for: ModelCatalog.stt, in: ttsConfig.paths)) { row in
+                 downloadRow(row)
+                 }
+              ForEach(downloads.rows(for: ModelCatalog.tts, in: ttsConfig.paths)) { row in
+                 downloadRow(row)
+                 }
+
+              if !downloads.status.isEmpty {
+                 Text(downloads.status)
+                      .font(.caption)
+                      .foregroundStyle(downloads.lastError == nil ? Color.secondary : Color.red)
+                 }
+              if let error = downloads.lastError {
+                 Text(error).font(.caption).foregroundStyle(.red)
+                 }
+              if downloads.activeModelID != nil {
+                 Button("Cancel download") { downloads.cancel() }
+                 }
+              Button("Refresh") {
+                 ttsConfig.scan()
+                 ttsConfig.scanSttModels()
+                 }
+            }   // end GROUP 3
+
+             // ── GROUP 4: MODEL FOLDER ─────────────────────────────
             Section {
              Text("MODEL FOLDER")
                   .font(.caption).fontWeight(.bold)
@@ -190,6 +226,38 @@ struct SettingsView: View {
          .frame(width: 480, height: 620)
          .onAppear { ttsConfig.scan(); ttsConfig.scanSttModels() }
      }
+
+     /// One row of the download list.
+    private func downloadRow(_ row: ModelDownloadController.Row) -> some View {
+        let model = row.model
+        let fraction = downloads.progress[model.id]
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.displayName).font(.callout)
+                if let fraction {
+                    ProgressView(value: fraction)
+                         .frame(maxWidth: 220)
+                    } else {
+                    Text(ByteCountFormatter.string(fromByteCount: model.byteSize, countStyle: .file))
+                         .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            Spacer()
+            if row.isInstalled {
+                Label("Installed", systemImage: "checkmark.circle.fill")
+                     .labelStyle(.iconOnly)
+                     .foregroundStyle(.green)
+                     .help("Already on disk.")
+            } else if downloads.activeModelID == model.id {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Download") {
+                    downloads.download(model, into: ttsConfig.paths)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
 
      /// Ask the user for a model folder and adopt it.
     private func chooseModelRoot() {
