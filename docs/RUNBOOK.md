@@ -51,10 +51,11 @@ place, so an interrupted download can never look like an installed model.
 | Piper (DEFAULT) | `scripts/install-piper.sh` | ✅ | local ONNX, voices under `piper/voice/` |
 | Kokoro-82M | install a `kokoro` CLI | ✅ | local, heavy (first run ~15 s) |
 | Edge TTS | `pip install edge-tts` | ❌ | online MS voices; the app asks before sending |
+| Fish Audio Drama 3 | `sgl-omni serve --model-path fishaudio/drama-3` | ❌ | served 35B model: multi-speaker + cloning |
 
 Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`.
 
-> **Privacy.** Edge TTS is the only online engine. The app asks for
+> **Privacy.** Edge TTS and Fish Audio are the online engines. The app asks for
 > confirmation before the first send and shows a notice in the status line. The
 > text is handed to the engine through a private (0600) temp file, never on the
 > command line.
@@ -66,6 +67,43 @@ Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`
 > before the utterance drains — the engine now has a deadline, so it fails
 > with a clear error instead of hanging. For headless smoke tests, prefer a
 > file-producing engine (`piper`, `edgeTTS`, `kokoro`) with `--no-play`.
+
+## 2b. Fish Audio Drama 3 (served, multi-speaker)
+
+Drama 3 is too large for a Mac, so it runs on a GPU behind an
+OpenAI-compatible endpoint:
+
+```bash
+# SGLang-Omni (or vLLM-Omni - see the Drama 3 recipes)
+uv pip install --prerelease=allow -v -e ".[fishaudio]"
+hf download fishaudio/drama-3            # 37 GB (FP8 experts)
+# …or the 4-bit checkpoint (20.8 GB, needs compute capability 8.0+):
+# hf download fishaudio/drama-3-int4
+sgl-omni serve --model-path fishaudio/drama-3 --port 8000
+```
+
+Point VoiceBridge at it:
+
+```bash
+export VOICEBRIDGE_FISH_TTS=http://127.0.0.1:8000
+# voice cloning (the server needs the reference transcript too):
+export VOICEBRIDGE_FISH_REFERENCE=/path/to/reference.wav
+export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
+```
+
+```bash
+.build/release/voicebridge-cli tts --text "<|speaker:2|> Hello." --engine fish
+```
+
+| Variable | Meaning |
+|---|---|
+| `VOICEBRIDGE_FISH_TTS` | the server's base URL (the engine is only offered when this is set) |
+| `VOICEBRIDGE_FISH_REFERENCE` | a reference clip (local path or URL) for voice cloning |
+| `VOICEBRIDGE_FISH_REFERENCE_TEXT` | the transcript of that clip |
+| `VOICEBRIDGE_FISH_API_KEY` | bearer token, if the server wants one |
+
+Without `VOICEBRIDGE_FISH_TTS` the engine reports itself unavailable and the
+manager falls back to the built-in voice (and says so).
 
 ## 3. Build and smoke test
 

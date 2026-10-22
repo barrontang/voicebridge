@@ -213,6 +213,14 @@ public struct TTSManager {
             return EdgeTTSBackend(modelDirectory: env.paths.root,
                                binaryLocator: env.binaryLocator,
                               binaryOverride: raw)
+        case .fishAudio:
+            // Only available when a server is configured; otherwise the
+            // manager falls back to the built-in voice (and says so).
+            if let configured = FishAudioBackend.fromEnvironment() {
+                return configured
+                }
+            return FishAudioBackend(baseURL: URL(string: "http://127.0.0.1:8000")!,
+                                    isConfigured: false)
            }
      }
 }

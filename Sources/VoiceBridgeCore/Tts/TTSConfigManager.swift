@@ -316,7 +316,7 @@ public final class TTSConfigManager: ObservableObject {
             return paths.kokoroDir.appendingPathComponent(name).appendingPathExtension("onnx")
         case .system:
             return nil
-        case .edgeTTS:
+        case .edgeTTS, .fishAudio:
             return nil
           }
          }

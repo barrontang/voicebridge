@@ -207,7 +207,9 @@ struct Main {
                             case "piper": m = .piper
                             case "kokoro": m = .kokoro
                             case "edge", "edge-tts", "edgetts": m = .edgeTTS
-                            default: print("unknown --engine '\(raw)' (try piper|kokoro|edge|system)")
+                            case "fish", "fish-audio", "drama", "drama-3": m = .fishAudio
+                            default: print("unknown --engine '\(raw)' "
+                                          + "(try piper|kokoro|edge|fish|system)")
                         }
                     }
                     if let m { engine = m }
@@ -318,6 +320,7 @@ struct Main {
         print("  STT  whisper-cli : \(whisperAvailable())")
         print("  TTS  piper        : \(piperAvailable())")
         print("  TTS  edge-tts     : \(edgeAvailable())")
+        print("  TTS  fish audio   : \(fishAvailable())")
         print("  TTS  system (AVSpeech): always available")
         print("  models root   : \(roots.root.path)")
         print("  microphone    : \(micPermissionStatus())")
@@ -343,6 +346,10 @@ struct Main {
              FileManager.default.isExecutableFile(atPath: p) { return true }
         return locator.isAvailable("piper")
        }
+    /// A Fish Audio Drama 3 server is configured (the engine is online).
+    static func fishAvailable() -> Bool {
+        FishAudioBackend.fromEnvironment() != nil
+    }
     static func edgeAvailable() -> Bool {
         if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_EDGE_TTS"],
              FileManager.default.isExecutableFile(atPath: p) { return true }
@@ -379,7 +386,7 @@ struct Main {
                  voicebridge-cli -- run STT / TTS without opening the GUI
                  stt   <audio> [lang] [model]   transcribe one file (any format)
                  transcribe --in <dir> --out <dir>   transcribe a whole folder
-                 tts   --text "..." [--voice V] [--engine piper|system|edgeTTS|kokoro]
+                 tts   --text "..." [--voice V] [--engine piper|system|edgeTTS|kokoro|fish]
                        `... | voicebridge-cli tts` [--engine ...]  speak piped text
                  ping                            show engine, model, & mic availability
                  --version                       print the version

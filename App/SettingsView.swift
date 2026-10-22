@@ -35,6 +35,10 @@ struct SettingsView: View {
                               + "High-quality neural voice; first run warms up ~15 s."
           case .edgeTTS: return "Edge TTS streams from Microsoft's servers. "
                               + "Best quality, needs the Internet each time."
+          case .fishAudio: return "Fish Audio Drama 3 - a served 35B model with "
+                              + "multi-speaker voices and voice cloning. "
+                              + "Needs a local Drama 3 server "
+                              + "(VOICEBRIDGE_FISH_TTS). "
           case .system:  return "Built-in macOS voice. No download, always "
                               + "available, basic quality."
          }
@@ -98,7 +102,9 @@ struct SettingsView: View {
                          Text(name).tag(Optional(name))
                          }
                      }
-                     .disabled(ttsConfig.selectedMode == .system || ttsConfig.selectedMode == .edgeTTS)
+                     .disabled(ttsConfig.selectedMode == .system
+                               || ttsConfig.selectedMode == .edgeTTS
+                               || ttsConfig.selectedMode == .fishAudio)
                      .help("Pick a Piper .onnx voice. Other engines use their own default.")
 
                  Text(ttsEngineBlurb)

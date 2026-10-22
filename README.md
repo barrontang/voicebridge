@@ -36,6 +36,9 @@
   - **Piper** (default) — local ONNX, offline, natural-sounding.
   - **Kokoro** — high-quality local TTS runtime.
   - **Microsoft Edge-TTS** — online premium voices (asks before sending your text).
+  - **Fish Audio Drama 3** — a served 35B MoE model: multi-speaker (16 characters),
+    voice cloning and long-form chunking. Talks to a local `sgl-omni` / `vllm-omni`
+    server (asks before sending your text).
   - **AVSpeechSynthesizer** — built-in system voice, always-available fallback.
 - **⬇️ One-click model install** — download whisper models and Piper voices from the Settings page
   (progress, disk-space check, checksum, crash-safe writes). No terminal required.
@@ -83,6 +86,31 @@ brew install whisper-cpp                 # the STT engine
 ```
 
 👉 Full walkthrough: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+
+### Fish Audio Drama 3 (multi-speaker, voice cloning)
+
+Drama 3 is a 35B MoE model (37 GB of weights, 3B active per token) — it needs an
+NVIDIA GPU, so it is *served* and VoiceBridge talks to it over HTTP:
+
+```bash
+# 1. serve the model (SGLang-Omni, or vLLM-Omni)
+uv pip install --prerelease=allow -v -e ".[fishaudio]"      # from the sglang-omni repo
+hf download fishaudio/drama-3                               # or fishaudio/drama-3-int4
+sgl-omni serve --model-path fishaudio/drama-3 --port 8000
+
+# 2. point VoiceBridge at it
+export VOICEBRIDGE_FISH_TTS=http://127.0.0.1:8000
+# optional: clone a voice from a reference clip
+export VOICEBRIDGE_FISH_REFERENCE=/path/to/reference.wav
+export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
+
+# 3. use it
+.build/release/voicebridge-cli tts --text "<|speaker:1|> Hello." --engine fish
+```
+
+The engine supports Drama 3's speaker tags (`<|speaker:0|>` … `<|speaker:15|>`)
+directly in the text. It is an *online* engine for VoiceBridge's privacy model
+(the text goes to an HTTP service), so the app asks before the first send.
 
 ---
 
@@ -163,9 +191,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
 
 - The microphone audio **never leaves the machine**.
 - Piper, Kokoro and the built-in voice run entirely offline.
-- **Edge TTS is the one online engine.** The app asks before the first send and shows a
-  notice in the status line; the text is passed to the engine through a private temp file
-  (never on the command line).
+- **Edge TTS and Fish Audio are the online engines.** The app asks before the first send
+  and shows a notice in the status line; for Edge TTS the text is passed to the engine
+  through a private temp file (never on the command line). A Fish Audio server is usually
+  local (`127.0.0.1`), but VoiceBridge cannot know that — so it asks either way.
 - Settings live in `~/Library/Application Support/VoiceBridge/config.json` — no telemetry,
   no analytics, no network calls of any kind.
 

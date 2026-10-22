@@ -316,7 +316,7 @@ struct ContentView: View {
      private func speak() {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         // An online engine sends the text to a remote service: ask first.
-        if ttsConfig.selectedMode == .edgeTTS && !onlineConsentGiven {
+        if ttsConfig.selectedMode.isOnline && !onlineConsentGiven {
             pendingOnlineText = text
             return
             }
