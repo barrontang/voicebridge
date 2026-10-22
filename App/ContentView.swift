@@ -163,10 +163,17 @@ struct ContentView: View {
                          .foregroundStyle(.secondary)
                     if live.isRunning {
                         // A cheap level meter: it proves the mic is live.
-                        ProgressView(value: Double(live.level))
-                            .frame(width: 60)
+                        LevelMeter(level: Double(live.level))
                             .help("Microphone level")
                         }
+                    }
+
+                  // While push-to-talk is recording, show that the app is
+                  // alive and reacting to the voice.
+                 if sttPhase == .recording {
+                    RecordingIndicator(level: Double(recorder.level),
+                                       label: "Recording - speak now")
+                        .padding(.top, 2)
                     }
 
                   // Scrollable transcript (live or last push-to-talk result).

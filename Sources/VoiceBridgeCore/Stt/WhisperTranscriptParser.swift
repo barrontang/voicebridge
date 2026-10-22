@@ -59,9 +59,16 @@ public enum WhisperTranscriptParser {
 
         /// Reads and trims a `-otxt` transcript file. Empty string if the file is
        /// absent or unopenable.
+    /// Reads and trims a `-otxt` transcript file. Empty string if the file is
+    /// absent or unopenable.
+    ///
+    /// whisper writes `[00:00:00.000 --> 00:00:02.000]  hello` when
+    /// timestamps are on. The live path needs the JSON's *offsets* (so the
+    /// reconciler can de-duplicate), but the caption itself must be plain
+    /// text - so the prefixes are stripped here.
     public static func loadText(atPath path: String) -> String {
         let raw = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-        return normalize(raw)
+        return normalize(strippingTimestamps(raw))
           }
 
         /// Extracts a transcript from `whisper-cli` stdout.
@@ -72,6 +79,7 @@ public enum WhisperTranscriptParser {
     public static func plainText(from stdout: String) -> String {
         let lines = stdout
                  .split(whereSeparator: \.isNewline)
+                 .map { strippingTimestamps(String($0)) }
                  .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                  .filter { !$0.isEmpty }
                  .filter {
@@ -80,6 +88,28 @@ public enum WhisperTranscriptParser {
                     }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
           }
+
+        /// Remove whisper's `[00:00:00.000 --> 00:00:02.000] ` prefixes.
+    ///
+    /// The timings stay available in the JSON report (that is what the live
+    /// path needs); the *text* the user reads stays plain.
+    public static func strippingTimestamps(_ text: String) -> String {
+        guard text.contains("[") else { return text }
+        var out: [String] = []
+        for line in text.split(whereSeparator: \.isNewline) {
+            var rest = String(line)
+            // A line may carry several timestamped chunks.
+            while rest.hasPrefix("[") {
+                guard let close = rest.firstIndex(of: "]") else { break }
+                rest = String(rest[rest.index(after: close)...])
+                while rest.hasPrefix(" ") || rest.hasPrefix("\t") {
+                    rest.removeFirst()
+                    }
+                }
+            out.append(rest)
+           }
+        return out.joined(separator: "\n")
+        }
 
         /// Parses a JSON report. Returns nil when the payload is not a recognised
         /// object.
@@ -106,7 +136,7 @@ public enum WhisperTranscriptParser {
         var out: [TimedSegment] = []
         for seg in segments ?? [] {
             let raw = (seg["transcription"] as? String) ?? (seg["text"] as? String) ?? ""
-            let text = normalize(raw)
+            let text = normalize(strippingTimestamps(raw))
             guard !text.isEmpty else { continue }
 
             var start: Double?
@@ -158,7 +188,7 @@ public enum WhisperTranscriptParser {
             pieces.append(s)
              }
         return pieces
-                 .map { normalize($0) }
+                 .map { normalize(strippingTimestamps($0)) }
                  .filter { !$0.isEmpty }
                  .joined(separator: " ")
           }

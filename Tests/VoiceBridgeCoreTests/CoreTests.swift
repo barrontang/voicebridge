@@ -165,4 +165,41 @@ final class CoreTests: XCTestCase {
            XCTAssertEqual(u16(34), 16)        // bits per sample
            }
 
-       }
+       
+    // MARK: - Timestamps must never reach the caption
+
+    /// whisper prints `[00:00:00.000 --> 00:00:03.000]` in front of the text
+    /// on stdout. The caption must be plain words.
+    func testTimestampsAreStrippedFromTheTranscript() {
+        let stamped = """
+        [00:00:00.000 --> 00:00:03.000]   Hello Voice Bridge
+        [00:00:03.000 --> 00:00:05.500]   this is a test
+        """
+        let clean = WhisperTranscriptParser.strippingTimestamps(stamped)
+        XCTAssertFalse(clean.contains("["))
+        XCTAssertFalse(clean.contains("-->"))
+        XCTAssertTrue(clean.contains("Hello Voice Bridge"))
+        XCTAssertTrue(clean.contains("this is a test"))
+    }
+
+    /// The same for a single line and for text without any prefix.
+    func testStrippingTimestampsLeavesPlainTextAlone() {
+        XCTAssertEqual(WhisperTranscriptParser.strippingTimestamps("hello world"),
+                       "hello world")
+        XCTAssertEqual(
+            WhisperTranscriptParser.strippingTimestamps("[00:00:00.000 --> 00:00:01.000] hi"),
+            "hi")
+    }
+
+    /// The JSON report's text is cleaned up too.
+    func testJSONTextIsStrippedOfTimestamps() throws {
+        let json = """
+        { "result": [ { "transcription": "[00:00:00.000 --> 00:00:01.000]   hello",
+                         "offsets": { "from": 0, "to": 1000 } } ] }
+        """
+        let meta = try XCTUnwrap(WhisperTranscriptParser.parseJSON(Data(json.utf8)))
+        XCTAssertFalse(meta.text.contains("-->"))
+        XCTAssertTrue(meta.text.contains("hello"))
+        XCTAssertEqual(meta.segments.first?.text, "hello")
+    }
+}

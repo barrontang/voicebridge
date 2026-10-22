@@ -19,6 +19,9 @@ public final class PushToTalkSession: ObservableObject {
 
     @Published public private(set) var phase: Phase = .idle
     @Published public private(set) var status = "Ready."
+    /// The input level of the last frame (0…1). The UI animates with it, so
+    /// the user can see that the app is really listening.
+    @Published public private(set) var level: Float = 0
 
     /// Where the recording is written (valid after `start`).
     public private(set) var outputURL: URL?
@@ -32,6 +35,14 @@ public final class PushToTalkSession: ObservableObject {
     private let maxSeconds: Double = 600
 
     public init() {}
+
+    /// The root-mean-square of a frame (a cheap level estimate).
+    nonisolated static func rms(of samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var acc: Float = 0
+        for s in samples { acc += s * s }
+        return (acc / Float(samples.count)).squareRoot()
+    }
 
     /// Ask for microphone access (async, never blocks the caller).
     public static func requestPermission() async -> Bool {
@@ -57,7 +68,14 @@ public final class PushToTalkSession: ObservableObject {
             // The sink runs on the audio pump thread, so the samples go into
             // a lock-protected buffer (never on the main actor).
             self?.accumulator.append(frame, limit: limit)
-        }
+            // The level is published for the animation - throttled, so the
+            // UI is not flooded with 50 updates a second.
+            let rms = Self.rms(of: frame.samples)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.level = min(1, rms * 4)
+                }
+            }
         do {
             try router.start()
             } catch {
@@ -73,6 +91,7 @@ public final class PushToTalkSession: ObservableObject {
     public func stop() throws -> URL? {
         guard isRecording else { return outputURL }
         router.stop()
+        level = 0
         if let sinkID { router.removeSink(sinkID) }
         sinkID = nil
         isRecording = false
