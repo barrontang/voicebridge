@@ -40,13 +40,22 @@ jobs:
       # password. Without them the bundle is still shipped (ad-hoc signed),
       # which is fine for a local install but Gatekeeper will complain.
       - name: Notarize
-        if: ${{ env.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
         run: |
+          # No credentials? Ship the ad-hoc signed build and say so.
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+            echo "::notice::No Apple credentials configured - shipping an ad-hoc signed build."
+            exit 0
+          fi
+          # Notarization needs a Developer ID certificate (not an ad-hoc one).
+          if ! security find-identity -v -p codesigning | grep -q "Developer ID"; then
+            echo "::notice::No Developer ID certificate in the keychain - skipping notarization."
+            exit 0
+          fi
           if [ -n "$APPLE_PRIVATE_KEY" ]; then
             echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.p8
             xcrun notarytool submit Build/VoiceBridge.app \

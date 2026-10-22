@@ -53,8 +53,6 @@ jobs:
 
       - name: actionlint
         uses: rhysd/actionlint@v1
-        with:
-          shell: bash
 
       - name: The version is in sync
         run: |
