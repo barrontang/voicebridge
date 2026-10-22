@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (without the 'v' prefix)"
+        required: true
+        default: "1.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build and test
+        run: |
+          swift build -c release
+          swift test
+
+      - name: Build the app bundle
+        run: ./scripts/make-app.sh release
+
+      - name: Package
+        run: |
+          cd Build
+          zip -r VoiceBridge-macOS.zip VoiceBridge.app
+          ls -lh VoiceBridge-macOS.zip
+
+      # Notarization needs a Developer ID certificate and an app-specific
+      # password. Without them the bundle is still shipped (ad-hoc signed),
+      # which is fine for a local install but Gatekeeper will complain.
+      - name: Notarize
+        if: ${{ env.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APPLE_PRIVATE_KEY" ]; then
+            echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.p8
+            xcrun notarytool submit Build/VoiceBridge.app \
+              --key /tmp/AuthKey.p8 \
+              --key-id "$APPLE_KEY_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+          else
+            xcrun notarytool submit Build/VoiceBridge.app \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+          fi
+          xcrun stapler staple Build/VoiceBridge.app
+          cd Build && zip -r VoiceBridge-macOS-notarized.zip VoiceBridge.app
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VoiceBridge ${{ github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            Build/VoiceBridge-macOS.zip
+            Build/VoiceBridge-macOS-notarized.zip

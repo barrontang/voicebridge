@@ -55,3 +55,12 @@ jobs:
         uses: rhysd/actionlint@v1
         with:
           shell: bash
+
+      - name: The version is in sync
+        run: |
+          CLI_VERSION=$(grep -oE 'static let version = "[^"]+"' Sources/voicebridge-cli/VoiceBridgeCLI.swift | grep -oE '[0-9][^"]+')
+          FILE_VERSION=$(cat VERSION)
+          if [ "$CLI_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::The CLI version ($CLI_VERSION) and VERSION ($FILE_VERSION) differ."
+            exit 1
+          fi
