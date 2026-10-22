@@ -14,6 +14,9 @@ public struct SpeakResult: Sendable {
     public let fellBack: Bool
     /// True when a real audio file exists at `url` (false for in-place engines).
     public let hasAudioFile: Bool
+    /// Set when the engine that ran sends the text to a remote service (the
+    /// UI shows it; `nil` for every offline engine).
+    public let privacyNotice: String?
 
         /// A short, UI-friendly status line (empty on the happy path).
     public var statusLine: String {
@@ -114,7 +117,8 @@ public struct TTSManager {
                                engineName: engine.displayName,
                                requestedMode: mode,
                                fellBack: fellBack,
-                               hasAudioFile: false)
+                               hasAudioFile: false,
+                               privacyNotice: Self.privacyNotice(for: engine))
         }
 
         // The cache dir may not exist yet (fresh install, user wiped it).
@@ -150,7 +154,8 @@ public struct TTSManager {
         guard play else {
             return SpeakResult(url: url, engineName: engine.displayName,
                                requestedMode: mode, fellBack: fellBack,
-                               hasAudioFile: hasFile)
+                               hasAudioFile: hasFile,
+                               privacyNotice: Self.privacyNotice(for: engine))
              }
 
         if engine.producesAudioFile {
@@ -167,7 +172,14 @@ public struct TTSManager {
               }
         return SpeakResult(url: url, engineName: engine.displayName,
                            requestedMode: mode, fellBack: fellBack,
-                           hasAudioFile: hasFile)
+                           hasAudioFile: hasFile,
+                           privacyNotice: Self.privacyNotice(for: engine))
+        }
+
+           /// The user-facing notice for an engine that works online.
+    private static func privacyNotice(for engine: any TTSBackend) -> String? {
+        guard engine.requiresNetwork else { return nil }
+        return "“\(engine.displayName)” is online: the text was sent to a remote service."
         }
 
            // Rough speaking-time estimate (~2.5 words/sec), kept for callers that

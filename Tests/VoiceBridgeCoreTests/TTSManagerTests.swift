@@ -127,6 +127,25 @@ final class TTSManagerTests: XCTestCase {
         XCTAssertTrue(result.hasAudioFile)
     }
 
+    func testOnlineEngineReportsAPrivacyNotice() async throws {
+        let config = try makeConfig()
+        let edge = FakeEngine(name: "Edge", fileExtension: "mp3", requiresNetwork: true)
+        let manager = TTSManager(config: config, pruneAfterWrite: false) { _, _, _ in edge }
+
+        let result = try await manager.speak("hello", mode: .edgeTTS, play: false)
+        XCTAssertNotNil(result.privacyNotice)
+        XCTAssertTrue(result.privacyNotice!.contains("online"))
+    }
+
+    func testOfflineEngineHasNoPrivacyNotice() async throws {
+        let config = try makeConfig()
+        let piper = FakeEngine(name: "Piper")
+        let manager = TTSManager(config: config, pruneAfterWrite: false) { _, _, _ in piper }
+
+        let result = try await manager.speak("hello", mode: .piper, play: false)
+        XCTAssertNil(result.privacyNotice)
+    }
+
     func testSpeechRunnerDeadlineIsBounded() {
         // A very long utterance gets a long (but finite) deadline; a short one
         // still gets a sane minimum.

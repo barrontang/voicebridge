@@ -31,6 +31,9 @@ struct ContentView: View {
      @State private var speaking = false
      @State private var currentTask: Task<Void, Never>?
      @State private var lastWav: URL?             // for "Save .wav..."
+       /// Set when the user asked to speak with an *online* engine and has
+       /// not acknowledged yet that the text leaves the machine.
+     @State private var pendingOnlineText: String?
 
      // - STT -
      @State private var sttPhase: SttPhase = .idle
@@ -211,7 +214,27 @@ struct ContentView: View {
           .onChange(of: ttsConfig.selectedSttModel) {
             applySttModel(ttsConfig.selectedSttModel)
          }
+          .alert("Send this text to Microsoft's servers?",
+                 isPresented: Binding(
+                    get: { pendingOnlineText != nil },
+                    set: { if !$0 { pendingOnlineText = nil } })) {
+            Button("Send it", role: .destructive) {
+                onlineConsentGiven = true
+                if let pending = pendingOnlineText {
+                    pendingOnlineText = nil
+                    performSpeak(pending)
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingOnlineText = nil }
+            } message: {
+                Text("The Edge TTS engine is online: the text is sent to a Microsoft "
+                     + "service and is not kept on your Mac. Pick a local engine "
+                     + "(Piper, Kokoro, Built-in) to stay offline.")
+            }
     }
+
+     /// Whether the user already agreed to send text to an online engine.
+    @AppStorage("voicebridge.onlineConsent") private var onlineConsentGiven = false
 
      // ---------- View models ----------
 
@@ -272,6 +295,17 @@ struct ContentView: View {
     @MainActor
      private func speak() {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // An online engine sends the text to a remote service: ask first.
+        if ttsConfig.selectedMode == .edgeTTS && !onlineConsentGiven {
+            pendingOnlineText = text
+            return
+            }
+        performSpeak(text)
+        }
+
+       /// The actual speak call (after any consent step).
+    @MainActor
+    private func performSpeak(_ text: String) {
         currentTask?.cancel()
         Playback.stopAll()
         speaking = true
@@ -286,6 +320,7 @@ struct ContentView: View {
                 if !Task.isCancelled {
                   var s = "Playing \(result.url.lastPathComponent) - \(result.engineName)"
                   if result.fellBack { s += "   (\(result.statusLine))" }
+                  if let notice = result.privacyNotice { s += "   [\(notice)]" }
                   ttsStatus = s
                      // Only a real audio file can be saved; the in-place
                      // (AVSpeech) engine produces no file at all.
