@@ -186,12 +186,14 @@ that enters the STT path is normalised to that shape:
 - **In-process whisper** (Finding 12). Linking `whisper.spm` removes the
   per-window process spawn (the reason `partialInterval` is 1.2 s) and
   unblocks the App Sandbox. It does not violate the offline ethos — it is
-  local inference — but it is a C/C++ link step. Interim: point the
-  `WhisperBackend` protocol at a `whisper-server` instance.
+  local inference — but it is a C/C++ link step. **Interim (implemented):**
+  `WhisperServerBackend` talks to a local `whisper.cpp` server
+  (`VOICEBRIDGE_WHISPER_SERVER=http://127.0.0.1:8080`), which keeps the
+  model resident and speaks the same `WhisperBackend` protocol.
 - **Voice cloning.** Piper's zero-shot clone is a research branch; a real
   cloning path would be a `CloningTTSEngine` (XTTS-v2 / Kokoro / MLX) behind
   `TTSBackend`.
-- **Localization.** The UI strings are centralised in the SwiftUI shell; a
-  String Catalog is a mechanical follow-up.
+- **Localization.** The UI is small and its strings live in the SwiftUI
+  shell; moving them into a String Catalog is a mechanical follow-up.
 - **A `whisper.cpp` model server / GPU batching** for throughput on long
   files.

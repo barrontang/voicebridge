@@ -30,6 +30,8 @@
   - **Push-to-talk**: record a clip, transcribe it.
   - **Any input format**: mp3, m4a, aiff, wav, … are transcoded to whisper's shape automatically.
   - **Batch mode**: transcribe a whole folder from the CLI.
+  - **Server mode**: point `VOICEBRIDGE_WHISPER_SERVER` at a local `whisper-server` and the
+    model stays resident — no process spawn per live window.
 - **🔊 Text-to-Speech** — pluggable back-end architecture:
   - **Piper** (default) — local ONNX, offline, natural-sounding.
   - **Kokoro** — high-quality local TTS runtime.
@@ -197,9 +199,10 @@ Contributions are welcome!
 - [x] Any-format input + batch transcription
 - [x] Hardened process runner (timeouts, cancellation, no deadlocks)
 - [ ] **In-process whisper** (`whisper.spm`) — removes the per-window process spawn and
-      unblocks the App Sandbox. Interim: a `whisper-server` backend behind the same protocol.
+      unblocks the App Sandbox. Interim: `VOICEBRIDGE_WHISPER_SERVER` points the app at a
+      local `whisper-server`, which keeps the model resident.
 - [ ] Voice cloning (XTTS-v2 / Kokoro) behind `TTSBackend`
-- [ ] Localization (the UI strings are centralised, so a String Catalog is mechanical)
+- [ ] Localization (the UI is small; a String Catalog is a mechanical follow-up)
 - [ ] Notarized release build (the workflow is in `.github/workflows/release.yml`)
 
 ---

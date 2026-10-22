@@ -28,6 +28,17 @@ Model files land in `~/.voicebridge/models/tts/whisper/ggml-<model>.bin`
 > flags fall back to stdout; a non-zero exit caused *only* by an unrecognised
 > flag is retried without it, so genuine transcription errors still surface.
 
+**Server mode (faster live captions).** `whisper.cpp` ships a server that
+keeps the model resident, so the live path does not spawn a process per
+window:
+
+```bash
+whisper-server -m ~/.voicebridge/models/tts/whisper/ggml-large-v3-turbo.bin
+export VOICEBRIDGE_WHISPER_SERVER=http://127.0.0.1:8080
+```
+
+The app and the CLI pick it up automatically. It is still 100% local.
+
 **No terminal?** Open the app → Settings → **Download models** → *Download*.
 The file is streamed into a `.partial` sidecar, verified, and renamed into
 place, so an interrupted download can never look like an installed model.

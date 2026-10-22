@@ -63,7 +63,7 @@ struct Main {
           // Any input format is fine: transcode to the 16 kHz / mono shape
          // whisper.cpp wants (the file is a WAV already? → a straight copy).
         let prepared = try prepareAudio(audio)
-        let t = try await WhisperCliBackend().transcribe(
+        let t = try await sttBackend().transcribe(
             audio: prepared, language: lang, model: model, useTimestamps: false)
          print("—"); print(t.text); print("—")
         var meta = "lang=\(t.language)  model=\(t.model.rawValue)"
@@ -125,7 +125,7 @@ struct Main {
         for file in files {
             do {
                 let prepared = try prepareAudio(file)
-                let t = try await WhisperCliBackend().transcribe(
+                let t = try await sttBackend().transcribe(
                     audio: prepared, language: language, model: model, useTimestamps: false)
                 let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 let out = outDir.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".txt")
@@ -140,7 +140,14 @@ struct Main {
         print("\(done) transcribed, \(failed) failed")
     }
 
-        /// The file extensions the batch mode picks up.
+        /// The STT backend: a local whisper.cpp server when one is configured,
+       /// otherwise the out-of-process `whisper-cli`.
+    static func sttBackend() -> any WhisperBackend {
+        if let server = WhisperServerBackend.fromEnvironment() { return server }
+        return WhisperCliBackend()
+    }
+
+       /// The file extensions the batch mode picks up.
     static let audioExtensions: Set<String> = [
         "wav", "mp3", "m4a", "aac", "flac", "ogg", "aiff", "aif", "caf", "mp4", "mov",
     ]

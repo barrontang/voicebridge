@@ -156,10 +156,18 @@ struct ContentView: View {
 
                   }
 
-                  // Status: live mode or push-to-talk mode.
-                 Text(displaySttStatus)
-                      .font(.footnote)
-                      .foregroundStyle(.secondary)
+                  // Status: live mode or push-to-talk mode + input level.
+                 HStack(spacing: 8) {
+                    Text(displaySttStatus)
+                         .font(.footnote)
+                         .foregroundStyle(.secondary)
+                    if live.isRunning {
+                        // A cheap level meter: it proves the mic is live.
+                        ProgressView(value: Double(live.level))
+                            .frame(width: 60)
+                            .help("Microphone level")
+                        }
+                    }
 
                   // Scrollable transcript (live or last push-to-talk result).
                 ScrollView {
@@ -520,6 +528,9 @@ struct ContentView: View {
         live.apply(LiveSttSession.Configuration(
             model: chosen ?? .tiny,
             modelDirectory: ttsConfig.paths.whisperDir,
-            scratchDir: ttsConfig.paths.cacheDir))
+            scratchDir: ttsConfig.paths.cacheDir,
+            // A local whisper.cpp server keeps the model resident - no
+            // process spawn per window.
+            serverURL: WhisperServerBackend.fromEnvironment()?.baseURL))
        }
 }

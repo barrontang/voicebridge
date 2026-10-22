@@ -41,19 +41,25 @@ public final class LiveSttSession: ObservableObject {
         public var windowSeconds: TimeInterval
         /// How much audio the engine keeps for the segmenter.
         public var ringBufferSeconds: TimeInterval
+        /// The URL of a local whisper.cpp server. When set, the live path
+        /// talks to it instead of spawning `whisper-cli` per window (the
+        /// model stays resident - no process spawn, no model load).
+        public var serverURL: URL?
 
         public init(model: SttModel = .largeV3Turbo,
                     modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
                     scratchDir: URL = ModelPaths.fromEnvironment().cacheDir,
                     partialInterval: TimeInterval = 1.2,
                     windowSeconds: TimeInterval = 4.0,
-                    ringBufferSeconds: TimeInterval = 60.0) {
+                    ringBufferSeconds: TimeInterval = 60.0,
+                    serverURL: URL? = nil) {
             self.model = model
             self.modelDirectory = modelDirectory
             self.scratchDir = scratchDir
             self.partialInterval = partialInterval
             self.windowSeconds = windowSeconds
             self.ringBufferSeconds = ringBufferSeconds
+            self.serverURL = serverURL
             }
     }
 
@@ -61,6 +67,9 @@ public final class LiveSttSession: ObservableObject {
     @Published public private(set) var status = "idle - press Live to start"
     /// The transcript so far: committed sentences plus the live one.
     @Published public private(set) var transcript = ""
+    /// The input level of the last frame (0…1, roughly -60…0 dBFS).
+    /// Cheap to compute and the only honest way to show "it hears you".
+    @Published public private(set) var level: Float = 0
 
     private var configuration: Configuration
     private let router: AudioInputRouter
@@ -132,6 +141,7 @@ public final class LiveSttSession: ObservableObject {
 
         phase = .idle
         status = "Idle."
+        level = 0
         }
 
     // MARK: - Pipeline
@@ -141,8 +151,17 @@ public final class LiveSttSession: ObservableObject {
 
         // The engine + view model are built per session so a restart starts
         // from a clean transcript.
+        //
+        // A local whisper.cpp server (when configured) keeps the model
+        // resident, so the live path does not spawn a process per window.
+        let fileBackend: any WhisperBackend
+        if let serverURL = config.serverURL {
+            fileBackend = WhisperServerBackend(baseURL: serverURL)
+        } else {
+            fileBackend = WhisperCliBackend(modelDirectory: config.modelDirectory)
+        }
         let backend = WindowedWhisperAdapter(
-            fileBackend: WhisperCliBackend(modelDirectory: config.modelDirectory),
+            fileBackend: fileBackend,
             scratchDir: config.scratchDir)
         let engineConfig = LiveTranscriptEngine.Config()
         let engine = LiveTranscriptEngine(backend: backend, config: engineConfig)
@@ -167,7 +186,11 @@ public final class LiveSttSession: ObservableObject {
             bufferingPolicy: .bufferingNewest(256))
         frameContinuation = continuation
 
-        let sink = router.addSink { frame in
+        let sink = router.addSink { [weak self] frame in
+            let rms = Self.rms(of: frame.samples)
+            Task { @MainActor [weak self] in
+                self?.level = min(1, rms * 4)
+                }
             continuation.yield(frame)
             }
         sinkID = sink
@@ -203,6 +226,14 @@ public final class LiveSttSession: ObservableObject {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         }
+
+    /// The root-mean-square of a frame (a cheap level estimate).
+    nonisolated static func rms(of samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var acc: Float = 0
+        for s in samples { acc += s * s }
+        return (acc / Float(samples.count)).squareRoot()
+    }
 
     // MARK: - Permissions
 
