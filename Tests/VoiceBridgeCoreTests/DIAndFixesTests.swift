@@ -49,6 +49,19 @@ final class DIAndFixesTests: XCTestCase {
     /// Support. Assert the URL's *shape* (no write, so the test is hermetic).
     func testConfigURLLivesInApplicationSupportNotTemp() throws {
         let url = try AppPaths.configURL()
+
+        // `VOICEBRIDGE_CONFIG_PATH` deliberately redirects the settings file
+        // (CI sets it so a test run can never touch the real one). Then the
+        // location is the redirect - and the point of the test (not the
+        // reclaimed temp region) still holds.
+        if let override = ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"] {
+            XCTAssertEqual(url.path, override)
+            XCTAssertFalse(url.path.hasPrefix(
+                FileManager.default.temporaryDirectory
+                         .deletingLastPathComponent().path + "/voicebridge"))
+            return
+            }
+
         let expectedPrefix = NSHomeDirectory() + "/Library/Application Support"
         XCTAssertTrue(url.path.hasPrefix(expectedPrefix),
             "config should live under Application Support, got \(url.path)")
@@ -68,8 +81,10 @@ final class DIAndFixesTests: XCTestCase {
         let legacy = AppPaths.legacyConfigURL()
         XCTAssertNotEqual(canonical, legacy,
             "legacy and canonical config paths must not coincide")
-        XCTAssertTrue(canonical.path.hasPrefix(
-            NSHomeDirectory() + "/Library/Application Support"))
+        if ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"] == nil {
+            XCTAssertTrue(canonical.path.hasPrefix(
+                NSHomeDirectory() + "/Library/Application Support"))
+            }
         XCTAssertTrue(legacy.path.hasPrefix(
             FileManager.default.temporaryDirectory.path))
     }
