@@ -52,7 +52,7 @@ jobs:
         run: ruby -ryaml -e 'YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'
 
       - name: actionlint
-        uses: rhysd/actionlint@v1
+        uses: rhysd/actionlint@v1.7.12
 
       - name: The version is in sync
         run: |
