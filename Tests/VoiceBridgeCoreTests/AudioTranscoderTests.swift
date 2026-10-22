@@ -10,23 +10,22 @@ final class AudioTranscoderTests: XCTestCase {
 
       /// A sample-rate conversion yields ≈ (in · to/from) output frames, and is a
       /// no-op at equal rates.
-    func testLinearResampleLengthIsProportional() {
+    func testResampleLengthIsProportional() {
         let input = (0..<48_000).map { Float($0) }      // 48 kHz, 1 s worth
-        let out = AudioTranscoder.linearResample(input, from: 48_000, to: 16_000)
+        let out = AudioResampler.resample(input, from: 48_000, to: 16_000)
           // 48 kHz → 16 kHz is a 3:1 down-sampling: ≈16 000 frames.
         XCTAssertEqual(out.count, 16_000, accuracy: 2)
       }
 
-    func testLinearResampleIsIdentityAtEqualRate() {
+    func testResampleIsIdentityAtEqualRate() {
         let input: [Float] = [0, 0.5, -0.5, 1.0, -1.0]
-        let out = AudioTranscoder.linearResample(input, from: 16_000, to: 16_000)
-          // Within the ±5 Hz dead-band the input is returned untouched.
+        let out = AudioResampler.resample(input, from: 16_000, to: 16_000)
         XCTAssertEqual(out, input)
       }
 
-    func testLinearResampleEmptyAndBadRates() {
-        XCTAssertTrue(AudioTranscoder.linearResample([], from: 48_000, to: 16_000).isEmpty)
-        XCTAssertTrue(AudioTranscoder.linearResample([1, 2, 3], from: 0, to: 16_000).isEmpty)
+    func testResampleEmptyAndBadRates() {
+        XCTAssertTrue(AudioResampler.resample([], from: 48_000, to: 16_000).isEmpty)
+        XCTAssertTrue(AudioResampler.resample([1, 2, 3], from: 0, to: 16_000).isEmpty)
       }
 
       /// Down-mixing averages a coherent stereo pair to its mono value.
@@ -85,7 +84,47 @@ final class AudioTranscoderTests: XCTestCase {
         XCTAssertEqual(Int(out.length), 1_600)
        }
 
-      // MARK: - RAW WAV fixture
+      /// The streaming writer produces a valid WAV and the right sample count.
+    func testStreamWriterProducesAValidWav() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vb-stream-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let writer = try WAVStreamWriter(url: url, sampleRate: 16_000)
+        try writer.append([Float](repeating: 0.5, count: 1_000))
+        try writer.append([Float](repeating: -0.5, count: 1_000))
+        try writer.finish()
+
+        // 1 000 + 1 000 samples = 2 000 frames = 4 000 bytes of PCM.
+        let data = try Data(contentsOf: url)
+        XCTAssertEqual(data.count, 44 + 4_000)
+        XCTAssertEqual(Array(data[0..<4]), Array("RIFF".utf8))
+        XCTAssertEqual(Array(data[36..<40]), Array("data".utf8))
+
+        // The patched sizes must match the payload.
+        func u32(_ off: Int) -> UInt32 {
+            UInt32(data[off]) | (UInt32(data[off + 1]) << 8)
+             | (UInt32(data[off + 2]) << 16) | (UInt32(data[off + 3]) << 24) }
+        XCTAssertEqual(u32(4), 36 + 4_000)
+        XCTAssertEqual(u32(40), 4_000)
+
+        // And it must be readable as audio.
+        let file = try AVAudioFile(forReading: url)
+        XCTAssertEqual(Int(file.length), 2_000)
+        XCTAssertEqual(file.processingFormat.sampleRate, 16_000, accuracy: 1)
+    }
+
+    /// A cancelled write leaves no half-written file behind.
+    func testStreamWriterCancelRemovesTheFile() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vb-stream-cancel-\(UUID().uuidString).wav")
+        let writer = try WAVStreamWriter(url: url, sampleRate: 16_000)
+        try writer.append([0.1, 0.2])
+        writer.cancel()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    // MARK: - RAW WAV fixture
 
            /// Manually emit a 48 kHz / stereo / 16-bit PCM WAV. `AVAudioFile(forWriting:)`
          /// aborts in a bare CLI/test context, so the bytes are written directly — the

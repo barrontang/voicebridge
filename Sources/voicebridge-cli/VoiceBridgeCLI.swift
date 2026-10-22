@@ -3,19 +3,24 @@ import VoiceBridgeCore
 import AVFoundation
 import Darwin
 
-/// voicebridge-cli — a headless demo that exercises VoiceBridgeCore so you can
-/// see the STT→TTS pipeline work *before* wiring the SwiftUI app. Not shipped in
-/// the GUI target, but useful for CI / smoke tests.
+/// voicebridge-cli — the headless entry point to VoiceBridgeCore: scripting,
+/// CI and smoke tests without opening the GUI.
 ///
 /// Usage:
-///    voicebridge-cli stt   <audio> [lang] [model]
-///    voicebridge-cli tts   --text "hello" [--voice NAME] [--engine piper|system|edgeTTS|kokoro]
-///    voicebridge-cli tts      --stdin            read text to speak from STDIN
-///    <agent output> | voicebridge-cli tts        speak piped text (works with offline engines)
-///    voicebridge-cli ping                  // report engine + model availability
+///    voicebridge-cli stt       <audio> [lang] [model]      transcribe one file
+///    voicebridge-cli transcribe --in <dir> --out <dir>     transcribe a folder
+///    voicebridge-cli tts       --text "hello" [--voice NAME] [--engine ...]
+///    voicebridge-cli tts       --stdin                     read the text from STDIN
+///    <agent output> | voicebridge-cli tts                 speak piped text
+///    voicebridge-cli ping                                 engine / model report
+///    voicebridge-cli --version
+///
+/// Any audio format works for `stt` (mp3, m4a, wav, …): the file is
+/// transcoded to the 16 kHz / mono shape whisper.cpp wants.
 ///
 /// Examples:
-///    ./voicebridge-cli stt  out.wav en large-v3-turbo
+///    ./voicebridge-cli stt  recording.m4a en large-v3-turbo
+///    ./voicebridge-cli transcribe --in ./inbox --out ./outbox
 ///    ./voicebridge-cli tts   --text "This is Piper, fully offline." --voice en_US-lessac-medium
 ///    ./voicebridge-cli ping
 @main
@@ -32,8 +37,10 @@ struct Main {
         do {
             switch args[0] {
             case "stt":      try await runSTT(Array(args.dropFirst()))
+            case "transcribe": try await runBatch(Array(args.dropFirst()))
             case "tts":      try await runTTS(Array(args.dropFirst()))
             case "ping":     runPing()
+            case "--version","-v","version": printVersion()
             case "help","-h","--help": printMenu()
             default:
                 print("Unknown subcommand: \(args[0])"); printMenu()
@@ -53,8 +60,11 @@ struct Main {
         let model = SttModel(rawValue: args.count > 2 ? args[2] : "large-v3-turbo") ?? .largeV3Turbo
 
         print("→ transcribing \(audio.lastPathComponent) with \(model.label)")
+          // Any input format is fine: transcode to the 16 kHz / mono shape
+         // whisper.cpp wants (the file is a WAV already? → a straight copy).
+        let prepared = try prepareAudio(audio)
         let t = try await WhisperCliBackend().transcribe(
-            audio: audio, language: lang, model: model, useTimestamps: false)
+            audio: prepared, language: lang, model: model, useTimestamps: false)
          print("—"); print(t.text); print("—")
         var meta = "lang=\(t.language)  model=\(t.model.rawValue)"
         if t.durationSeconds > 0 {
@@ -66,7 +76,96 @@ struct Main {
         print(meta)
        }
 
-       // MARK: - TTS
+       // MARK: - Batch
+
+       /// Transcribe every audio file in a folder.
+    ///
+    ///   voicebridge-cli transcribe --in ./inbox --out ./outbox [--lang en]
+    ///
+    /// Writes `<name>.txt` next to a copy of the transcript for each input
+    /// file. Files that fail are reported and skipped - one bad file must not
+    /// stop the batch.
+    static func runBatch(_ args: [String]) async throws {
+        var inputDir: URL?
+        var outputDir: URL?
+        var language: String?
+        var model = SttModel.largeV3Turbo
+
+        var it = args.makeIterator()
+        while let tok = it.next() {
+            switch tok {
+            case "--in":   inputDir = URL(fileURLWithPath: it.next() ?? ".")
+            case "--out":  outputDir = URL(fileURLWithPath: it.next() ?? ".")
+            case "--lang": language = it.next()
+            case "--model": model = SttModel(rawValue: it.next() ?? "") ?? .largeV3Turbo
+            default: print("ignoring: \(tok)")
+            }
+        }
+        guard let inputDir else {
+            print("usage: transcribe --in <dir> --out <dir> [--lang LANG] [--model MODEL]")
+            return
+        }
+        let outDir = outputDir ?? inputDir
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        let fm = FileManager.default
+        let files = try fm.contentsOfDirectory(at: inputDir,
+                                              includingPropertiesForKeys: nil,
+                                              options: [.skipsHiddenFiles])
+            .filter { Self.audioExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        guard !files.isEmpty else {
+            print("no audio files in \(inputDir.path)")
+            return
+        }
+
+        var done = 0
+        var failed = 0
+        for file in files {
+            do {
+                let prepared = try prepareAudio(file)
+                let t = try await WhisperCliBackend().transcribe(
+                    audio: prepared, language: language, model: model, useTimestamps: false)
+                let text = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let out = outDir.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".txt")
+                try text.write(to: out, atomically: true, encoding: .utf8)
+                print("✓ \(file.lastPathComponent) → \(out.lastPathComponent) (\(text.count) chars)")
+                done += 1
+            } catch {
+                print("✗ \(file.lastPathComponent): \(error.localizedDescription)")
+                failed += 1
+            }
+        }
+        print("\(done) transcribed, \(failed) failed")
+    }
+
+        /// The file extensions the batch mode picks up.
+    static let audioExtensions: Set<String> = [
+        "wav", "mp3", "m4a", "aac", "flac", "ogg", "aiff", "aif", "caf", "mp4", "mov",
+    ]
+
+       /// Transcode `url` to a 16 kHz / mono WAV and return the path to use.
+    ///
+    /// A file that is already in the canonical shape is used as-is (no copy,
+    /// no re-encode).
+    static func prepareAudio(_ url: URL) throws -> URL {
+        let fm = FileManager.default
+        let cache = ModelPaths.fromEnvironment().cacheDir
+        try? fm.createDirectory(at: cache, withIntermediateDirectories: true)
+
+        if url.pathExtension.lowercased() == "wav" {
+            // Cheap check: is it already 16 kHz / mono?
+            if let file = try? AVAudioFile(forReading: url),
+               AudioTranscoder.isCanonical(file.processingFormat) {
+                return url
+            }
+        }
+        let out = cache.appendingPathComponent("cli-\(UUID().uuidString).wav")
+        return try AudioTranscoder.transcodeToWAV(from: url, to: out)
+    }
+
+// MARK: - TTS
     static func runTTS(_ args: [String]) async throws {
         var text = "Hello. This is a demo of VoiceBridge's engine selector."
         var voice: String? = nil
@@ -261,13 +360,22 @@ struct Main {
          #endif
       }
 
+       /// The CLI version (kept in sync with the app bundle's short version).
+    static let version = "1.1.0"
+
+    static func printVersion() {
+        print("voicebridge-cli \(version)")
+    }
+
        private static func printMenu() {
         print("""
                  voicebridge-cli -- run STT / TTS without opening the GUI
-                 stt   <audio> [lang] [model]   e.g. `stt out.wav en large-v3-turbo`
-                       `... | voicebridge-cli tts` [--engine ...]  speak piped text
+                 stt   <audio> [lang] [model]   transcribe one file (any format)
+                 transcribe --in <dir> --out <dir>   transcribe a whole folder
                  tts   --text "..." [--voice V] [--engine piper|system|edgeTTS|kokoro]
+                       `... | voicebridge-cli tts` [--engine ...]  speak piped text
                  ping                            show engine, model, & mic availability
+                 --version                       print the version
                  help                            this menu
                 """)
         }
