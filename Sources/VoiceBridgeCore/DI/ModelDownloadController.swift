@@ -1,6 +1,56 @@
 import Foundation
 import Combine
 
+/// Fetches one remote file into a local path.
+///
+/// The controller talks to this instead of `URLSession` directly, so the
+/// install / verify / notify flow can be tested without a network (and so a
+/// different transport could be plugged in).
+public protocol ModelFetcher: Sendable {
+    /// Download `remote` into `destination`, reporting progress (0…1).
+    ///
+    /// The file must be complete and in place when the call returns; an
+    /// implementation that fails must leave nothing behind that could pass
+    /// for an installed model.
+    func fetch(_ remote: URL,
+               to destination: URL,
+               progress: @escaping @Sendable (Double) -> Void) async throws
+}
+
+/// The production fetcher: a streaming download with a disk-space preflight.
+public struct URLSessionModelFetcher: ModelFetcher {
+
+    private let downloader = ModelDownloader()
+
+    public init() {}
+
+    public func fetch(_ remote: URL,
+                      to destination: URL,
+                      progress: @escaping @Sendable (Double) -> Void) async throws {
+        let directory = destination.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Refuse a download the disk cannot hold (before we start).
+        if let size = await remoteContentLength(remote) {
+            _ = try ModelDownloader.preflightFreeSpace(needed: size, at: destination)
+        }
+
+        for try await update in await downloader.download(remote, to: destination) {
+            progress(update.fractionComplete)
+            }
+    }
+
+    /// The size of a remote file, when the server tells us.
+    private func remoteContentLength(_ url: URL) async -> Int64? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let head = response as? HTTPURLResponse else { return nil }
+        let length = head.expectedContentLength
+        return length > 0 ? length : nil
+    }
+}
+
 /// Drives `ModelDownloader` for the Settings page: progress, cancellation and
 /// the "is it already on disk?" check.
 @MainActor
@@ -23,9 +73,19 @@ public final class ModelDownloadController: ObservableObject {
     @Published public private(set) var lastError: String?
 
     private let downloader = ModelDownloader()
+    private let fetcher: any ModelFetcher
     private var currentTask: Task<Void, Never>?
 
-    public init() {}
+    /// Called after a model was installed (and verified).
+    ///
+    /// The owner uses it to rescan: without it the freshly downloaded model
+    /// stays invisible - the front page keeps saying "no whisper models on
+    /// disk" until the app is restarted.
+    public var onInstalled: (() -> Void)?
+
+    public init(fetcher: any ModelFetcher = URLSessionModelFetcher()) {
+        self.fetcher = fetcher
+    }
 
     /// Is `model` already installed under `root`?
     public func isInstalled(_ model: DownloadableModel, in root: ModelPaths) -> Bool {
@@ -60,6 +120,7 @@ public final class ModelDownloadController: ObservableObject {
             (url: $0.remoteURL,
              destination: destination.deletingLastPathComponent().appendingPathComponent($0.fileName))
         }
+        let fetcher = self.fetcher
 
         currentTask = Task { [weak self] in
             guard let self else { return }
@@ -72,14 +133,21 @@ public final class ModelDownloadController: ObservableObject {
                 self.currentTask = nil
             }
             do {
-                try await self.fetch(model.remoteURL, to: destination)
+                try await fetcher.fetch(model.remoteURL, to: destination) { [weak self] fraction in
+                    Task { @MainActor [weak self] in
+                        guard let self, let active = self.activeModelID else { return }
+                        self.progress[active] = fraction
+                        }
+                    }
                 for companion in companions {
-                    try await self.fetch(companion.url, to: companion.destination)
+                    try await fetcher.fetch(companion.url, to: companion.destination) { _ in }
                 }
                 if let expected = model.sha256 {
                     try await ModelDownloader.verifySHA256(of: destination, expected: expected)
                 }
                 self.status = "Installed \(model.displayName)."
+                // The model is on disk now - let the app rescan.
+                self.onInstalled?()
             } catch is CancellationError {
                 self.status = "Download cancelled."
             } catch {
@@ -95,33 +163,5 @@ public final class ModelDownloadController: ObservableObject {
         currentTask = nil
         activeModelID = nil
         status = "Download cancelled."
-    }
-
-    /// Stream one file into place.
-    private func fetch(_ remote: URL, to destination: URL) async throws {
-        let directory = destination.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        // Preflight: refuse a download the disk cannot hold.
-        if let size = await remoteContentLength(remote) {
-            _ = try ModelDownloader.preflightFreeSpace(needed: size, at: destination)
-        }
-
-        for try await progress in await downloader.download(remote, to: destination) {
-            if Task.isCancelled { throw CancellationError() }
-            if let active = activeModelID {
-                self.progress[active] = progress.fractionComplete
-            }
-        }
-    }
-
-    /// The size of a remote file, when the server tells us.
-    private func remoteContentLength(_ url: URL) async -> Int64? {
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let head = response as? HTTPURLResponse else { return nil }
-        let length = head.expectedContentLength
-        return length > 0 ? length : nil
     }
 }

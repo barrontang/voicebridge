@@ -222,6 +222,11 @@ struct ContentView: View {
           .onChange(of: ttsConfig.selectedSttModel) {
             applySttModel(ttsConfig.selectedSttModel)
          }
+          // A model was just downloaded (or removed): pick it up right away
+          // instead of waiting for a restart.
+          .onChange(of: ttsConfig.availableSttModels) {
+            applySttModel(ttsConfig.selectedSttModel)
+          }
           .alert("Send this text to Microsoft's servers?",
                  isPresented: Binding(
                     get: { pendingOnlineText != nil },
@@ -523,6 +528,13 @@ struct ContentView: View {
                  ? requested
                             : availableSttModel()
         sttModel = chosen
+        // Keep the status line in sync with what is actually usable - a model
+        // that was just downloaded must light the card up immediately.
+        if let chosen {
+            sttStatus = "Ready - \(chosen.label)."
+        } else {
+            sttStatus = "No whisper model on disk - download one in Settings."
+        }
         // The live session keeps its own model + folders; sync it when it is
         // not running (the settings page can change the model folder).
         live.apply(LiveSttSession.Configuration(
