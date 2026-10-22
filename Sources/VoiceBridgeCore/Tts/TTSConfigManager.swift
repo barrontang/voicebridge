@@ -54,6 +54,12 @@ public final class TTSConfigManager: ObservableObject {
 
     // Guard against writing during the initial load().
     private var isLoaded = false
+    /// Set when the on-disk config was written by a *newer* build: we read
+    /// what we understand and refuse to overwrite the newer file.
+    private var configIsReadOnly = false
+    /// Set when the on-disk config was in an older format and should be
+    /// rewritten in the current one (forward migration).
+    private var needsRewrite = false
 
           /// The voice the picked engine loads. For Piper this is a filename; for
          /// edge-tts / system it's a voice name. `nil` means "use engine default".
@@ -71,7 +77,13 @@ public final class TTSConfigManager: ObservableObject {
 
      /// Canonical, *persistent* settings URL (`~/Library/Application Support/
      /// VoiceBridge/config.json`, not the reclaimed temp dir the old code used).
-     public var persistURL: URL { (try? AppPaths.configURL()) ?? fallbackConfigURL }
+     public var persistURL: URL {
+        if let explicitPersistURL { return explicitPersistURL }
+        return (try? AppPaths.configURL()) ?? fallbackConfigURL
+        }
+
+       /// Test/dev override for `persistURL`.
+    public var explicitPersistURL: URL? = nil
 
        /// Last-resort location when Application Support can't be resolved (tests,
        /// sandboxless contexts).
@@ -81,7 +93,8 @@ public final class TTSConfigManager: ObservableObject {
        /// The settings version we read/write; bump + add a `migrate` step when the
         /// structure changes (Missing 4 — a 20-minute guard against a silent
         /// full-reset of every user's config on the next schema bump).
-    public static let schemaVersion = 1
+       /// v2 adds the custom model root (`root`).
+    public static let schemaVersion = 2
 
      /// Current version embedded in persisted state.
     public let schema: Int = TTSConfigManager.schemaVersion
@@ -101,22 +114,31 @@ public final class TTSConfigManager: ObservableObject {
 
      @discardableResult public func persist() -> URL? {
         guard isLoaded else { return nil }
-         struct CfgV1: Codable {
+        guard !configIsReadOnly else {
+            VBLog.models.warning("config persist skipped: the file was written by a newer VoiceBridge")
+            return nil
+            }
+         struct Cfg: Codable {
             let schemaVersion: Int
             let mode: TTSMode
             let voice: String?
             let sttModel: SttModel?
-            init(schemaVersion: Int, mode: TTSMode, voice: String?, sttModel: SttModel?) {
+            /// v2: the user's custom model root (the default location when nil).
+            let root: String?
+            init(schemaVersion: Int, mode: TTSMode, voice: String?,
+                 sttModel: SttModel?, root: String?) {
                 self.schemaVersion = schemaVersion
                 self.mode = mode
                 self.voice = voice
                 self.sttModel = sttModel
+                self.root = root
                       }
                     }
-        let cfg = CfgV1(schemaVersion: schema,
+        let cfg = Cfg(schemaVersion: schema,
                          mode: selectedMode,
                     voice: selectedModelFile,
-                    sttModel: selectedSttModel)
+                    sttModel: selectedSttModel,
+                    root: modelRoot.path)
         do {
             let data = try JSONEncoder().encode(cfg)
             let url = persistURL
@@ -148,56 +170,105 @@ public final class TTSConfigManager: ObservableObject {
 
         let url = persistURL
         guard let data = try? Data(contentsOf: url) else { return }
-             // The current schema.
-        struct CfgV1: Decodable {
-          let schemaVersion: Int?
+
+        // The current schema (v2): every field optional, so an older payload
+        // still decodes.
+        struct Cfg: Decodable {
+            let schemaVersion: Int?
             let mode: TTSMode?
             let voice: String?
             let sttModel: SttModel?
+            let root: String?
             }
         struct CfgLegacy: Decodable {            // schemaVersion 0 / pre-versioning
             let mode: TTSMode?
             let voice: String?
             let sttModel: SttModel?
             }
-        if let cfg = try? JSONDecoder().decode(CfgV1.self, from: data) {
-                 // A versioned record (>= 1). A future bump reads an older payload.
-            if let m = cfg.mode { selectedMode = m }
-               if let v = cfg.voice { selectedModelFile = v }
-               if let s = cfg.sttModel { selectedSttModel = s }
-        } else if let cfg = try? JSONDecoder().decode(CfgLegacy.self, from: data) {
-                 // A pre-versioning record: apply it, then `persist()` rewrites it
-                 // with the current `schemaVersion` (a forward migration).
-            if let m = cfg.mode { selectedMode = m }
-               if let v = cfg.voice { selectedModelFile = v }
-               if let s = cfg.sttModel { selectedSttModel = s }
-               VBLog.models.info("migrated a pre-versioned config to schema \(Self.schemaVersion)")
-                 }
+
+        guard let cfg = try? JSONDecoder().decode(Cfg.self, from: data) else {
+            if let legacy = try? JSONDecoder().decode(CfgLegacy.self, from: data) {
+                // A pre-versioning record: apply it, then rewrite it in the
+                // current schema (a forward migration).
+                if let m = legacy.mode { selectedMode = m }
+                if let v = legacy.voice { selectedModelFile = v }
+                if let s = legacy.sttModel { selectedSttModel = s }
+                needsRewrite = true
+                VBLog.models.info("migrated a pre-versioned config to schema \(Self.schemaVersion)")
+            }
+            return
+            }
+
+        // A record with no `schemaVersion` at all is pre-versioning: it
+        // decoded fine (every field is optional), but it must be rewritten in
+        // the current schema.
+        if cfg.schemaVersion == nil {
+            needsRewrite = true
+            VBLog.models.info("migrated a pre-versioned config to schema \(Self.schemaVersion)")
+            }
+
+        // A config written by a NEWER build: read what we understand, but do
+        // not clobber the file (the newer build's fields would be lost).
+        if let v = cfg.schemaVersion, v > Self.schemaVersion {
+            configIsReadOnly = true
+            VBLog.models.warning("config schema v\(v, privacy: .public) is newer than v\(Self.schemaVersion, privacy: .public); reading what we understand and leaving the file alone")
+            }
+
+        if let m = cfg.mode { selectedMode = m }
+        if let v = cfg.voice { selectedModelFile = v }
+        if let s = cfg.sttModel { selectedSttModel = s }
+
+        // v2: restore the custom model root, if the user picked one.
+        if let root = cfg.root, !root.isEmpty {
+            let rootURL = URL(fileURLWithPath: root, isDirectory: true)
+            if rootURL != modelRoot {
+                applyRoot(rootURL)
+                needsRewrite = true
+            }
+        }
           }
 
-    public init() {
+    public init(persistURL: URL? = nil) {
 // Initialize all stored properties from a *local* first; referencing
 // `self.paths` before every stored property is set is an error.
     let env = ModelPaths.fromEnvironment()
     self.paths = env
     self.modelRoot = env.root
     self.scanDirectory = env.piperVoiceDir
+    if let persistURL { self.explicitPersistURL = persistURL }
     // Now `self` is fully initialized; safe to call methods.
     load()
     scanSttModels()
     isLoaded = true
+    // Forward migration: an older (or pre-versioning) config is rewritten in
+    // the current schema *now*, not the next time the user happens to change
+    // a setting. (The old code claimed to do this but the `isLoaded` guard
+    // silently skipped it.)
+    if needsRewrite && !configIsReadOnly {
+        needsRewrite = false
+        persist()
+    }
     }
 
           /// Replaces the root for all engines and rescans. This is the one place
            /// a custom model folder is set; both TTS and STT now follow because they
              /// read from `paths`, which this updates.
      public func configureRoot(_ newRoot: URL) {
+        applyRoot(newRoot)
+        scan()
+        scanSttModels()
+        // The chosen root is part of the user's settings: persist it so the
+        // next launch uses the same folder.
+        persist()
+          }
+
+           /// Points every engine at `newRoot` (no scan, no persist - the
+            /// caller decides when to do those).
+    public func applyRoot(_ newRoot: URL) {
         self.paths = .make(newRoot)
         self.scanDirectory = newRoot
                      .appendingPathComponent("piper/voice", isDirectory: true)
         self.modelRoot = newRoot
-        scan()
-        scanSttModels()
           }
 
            /// Rescans `scanDirectory` for `.onnx` voices (Piper ships an

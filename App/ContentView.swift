@@ -405,7 +405,7 @@ struct ContentView: View {
         sttPhase = .transcribing
         sttStatus = "Transcribing…"
 
-        let model = sttModel ?? ContentView.availableSttModel()
+        let model = sttModel ?? availableSttModel()
         Task {
             do {
                  // AVAudioRecorder may need a beat to flush its final frames.
@@ -468,9 +468,13 @@ struct ContentView: View {
      // ---------- Helpers ----------
 
      /// First whisper model physically present on disk (preferred order).
-    static func availableSttModel() -> SttModel? {
+    ///
+    /// Resolved against the *configured* model root, so a custom folder is
+    /// honoured here too (the old static read ignored it - the "half my
+    /// models disappeared" bug).
+    func availableSttModel() -> SttModel? {
         for m in SttModel.allCases {
-            let url = ModelPaths.fromEnvironment().whisperDir.appendingPathComponent(m.ggmlFilename)
+            let url = ttsConfig.paths.whisperDir.appendingPathComponent(m.ggmlFilename)
             if FileManager.default.fileExists(atPath: url.path) { return m }
         }
         return nil
@@ -484,7 +488,7 @@ struct ContentView: View {
                  .appendingPathComponent(requested.ggmlFilename)
         let chosen = FileManager.default.fileExists(atPath: onDisk.path)
                  ? requested
-                            : ContentView.availableSttModel()
+                            : availableSttModel()
         sttModel = chosen
         // The live stream keeps its own model; sync it when not in a session.
         stream.useModel(chosen ?? .tiny)

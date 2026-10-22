@@ -11,6 +11,7 @@
 // heard.
 
 import SwiftUI
+import AppKit
 import VoiceBridgeCore
 
 struct SettingsView: View {
@@ -135,6 +136,32 @@ struct SettingsView: View {
                  }
              }   // end GROUP 2
 
+             // ── GROUP 3: MODEL FOLDER ─────────────────────────────
+            Section {
+             Text("MODEL FOLDER")
+                  .font(.caption).fontWeight(.bold)
+                  .foregroundStyle(.secondary)
+             Text("Where VoiceBridge looks for models. The default is "
+                   + "~/.voicebridge/models/tts. Pick a different folder and "
+                   + "both STT and TTS follow it - the choice is saved.")
+                   .font(.caption)
+                   .foregroundStyle(.secondary)
+
+              LabeledContent("Location") {
+                 Text(ttsConfig.modelRoot.path)
+                      .font(.caption)
+                      .textSelection(.enabled)
+                  }
+
+              HStack {
+                 Button("Choose folder...") { chooseModelRoot() }
+                 Button("Use default") {
+                     ttsConfig.configureRoot(ModelPaths.fromEnvironment().root)
+                 }
+                 Spacer()
+                 }
+            }   // end GROUP 3
+
              // ── What the save buttons do (shared explainer) ─────────
             Section {
                  Text("WHAT THE SAVE BUTTONS DO")
@@ -163,6 +190,20 @@ struct SettingsView: View {
          .frame(width: 480, height: 620)
          .onAppear { ttsConfig.scan(); ttsConfig.scanSttModels() }
      }
+
+     /// Ask the user for a model folder and adopt it.
+    private func chooseModelRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use folder"
+        panel.message = "Choose the folder that holds your models."
+        panel.directoryURL = ttsConfig.modelRoot
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        ttsConfig.configureRoot(url)
+    }
 
      /// The picker label, annotated with whether the model is on disk.
      private func sttModelLabel(_ m: SttModel) -> String {
