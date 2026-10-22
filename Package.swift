@@ -23,17 +23,23 @@ let package = Package(
     targets: [
         .target(
             name: "VoiceBridgeCore",
-            path: "Sources/VoiceBridgeCore"
+            path: "Sources/VoiceBridgeCore",
+            // Strict concurrency: the core is a library, so its data-race
+            // safety is part of its contract (and it is what a future Swift 6
+            // language mode will require).
+            swiftSettings: [.enableExperimentalFeature("StrictConcurrency")]
         ),
         .executableTarget(
             name: "voicebridge-cli",
             dependencies: ["VoiceBridgeCore"],
-            path: "Sources/voicebridge-cli"
+            path: "Sources/voicebridge-cli",
+            swiftSettings: [.enableExperimentalFeature("StrictConcurrency")]
         ),
         .executableTarget(
             name: "voicebridge-gui",
             dependencies: ["VoiceBridgeCore"],
-            path: "App"
+            path: "App",
+            swiftSettings: [.enableExperimentalFeature("StrictConcurrency")]
         ),
         .testTarget(
             name: "VoiceBridgeCoreTests",

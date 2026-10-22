@@ -54,7 +54,7 @@ public struct BinaryLocator: Sendable {
          }
 
         /// Test seam: inject the search paths and an `isExecutable` closure.
-    public init(searchPaths: SearchPaths, isExecutable: @escaping (String) -> Bool) {
+    public init(searchPaths: SearchPaths, isExecutable: @escaping @Sendable (String) -> Bool) {
         self.searchPaths = searchPaths
         self.check = .closure(isExecutable)
         }

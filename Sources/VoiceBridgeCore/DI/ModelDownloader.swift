@@ -107,7 +107,10 @@ public extension ModelDownloader {
 /// A reference type that owns the `URLSession`, its delegate, and its task for
 /// the life of a single download — the canonical way to keep a delegate alive
 /// without capturing it in the (value-typed) stream closure.
-final class DownloadJob: NSObject, URLSessionDownloadDelegate {
+// SAFETY (@unchecked Sendable): the mutable state (`session`, `task`,
+// `didFinish`) is only touched from the URLSession delegate queue, which
+// serialises those callbacks.
+final class DownloadJob: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
     private let from: URL
     private let into: URL
