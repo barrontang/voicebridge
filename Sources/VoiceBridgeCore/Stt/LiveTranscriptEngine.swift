@@ -122,7 +122,10 @@ public actor LiveTranscriptEngine {
         guard now - lastPartialAt >= config.partialInterval else { return }
         lastPartialAt = now
 
-        let lo = max(0, now - config.windowSeconds)
+        // The partial covers the *open utterance* (from its start to now), so
+        // the caption reads as a sentence. When no utterance is open we fall
+        // back to a trailing window.
+        let lo = segmenter.currentUtteranceStart ?? max(0, now - config.windowSeconds)
         let range = lo..<now
         guard let (samples, startTime) = ring.extract(range), !samples.isEmpty else { return }
 
@@ -148,7 +151,8 @@ public actor LiveTranscriptEngine {
                 await self?.apply(segments: segments,
                                   windowRange: range,
                                   windowIndex: idx,
-                                  utteranceID: utteranceID)
+                                  utteranceID: utteranceID,
+                                  isFinal: false)
             } catch is CancellationError {
                 // expected
             } catch {
@@ -187,7 +191,8 @@ public actor LiveTranscriptEngine {
                 await apply(segments: segments,
                            windowRange: range,
                            windowIndex: idx,
-                           utteranceID: utteranceID)
+                           utteranceID: utteranceID,
+                           isFinal: true)
             } catch {
                 emitGap(range)
             }
@@ -202,13 +207,15 @@ public actor LiveTranscriptEngine {
         segments: [TranscriptSegment],
         windowRange: Range<TimeInterval>,
         windowIndex: Int,
-        utteranceID: UUID?
+        utteranceID: UUID?,
+        isFinal: Bool
     ) async {
         let events = reconciler.ingest(
             segments: segments,
             windowRange: windowRange,
             windowIndex: windowIndex,
-            utteranceID: utteranceID
+            utteranceID: utteranceID,
+            isFinal: isFinal
         )
         for e in events { continuation?.yield(e) }
     }

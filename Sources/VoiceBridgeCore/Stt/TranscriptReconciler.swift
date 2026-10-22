@@ -11,41 +11,38 @@ struct TranscriptReconciler {
     private var watermark: TimeInterval = 0
 
     /// Tolerance when comparing a new segment against the watermark.
-    /// Whisper's segment timestamps are typically ±50 ms; 80 ms avoids
+    /// Whisper's segment timestamps are typically ±100 ms; 150 ms avoids
     /// both false dedupe and duplicate emissions at the seam.
-    private let watermarkTolerance: TimeInterval = 0.08
+    private let watermarkTolerance: TimeInterval = 0.15
 
     mutating func ingest(
         segments: [TranscriptSegment],
         windowRange: Range<TimeInterval>,
         windowIndex: Int,
-        utteranceID: UUID?
+        utteranceID: UUID?,
+        isFinal: Bool
     ) -> [TranscriptEvent] {
         var events: [TranscriptEvent] = []
 
         // 1. Drop re-emissions of already-committed audio.
         let fresh = segments.filter { $0.range.lowerBound >= watermark - watermarkTolerance }
 
-        // 2. A segment whose midpoint falls before the window's close will
-        //    not be revised — we always carry `overlap` seconds of left
-        //    context, so the next window re-covers it fully.
-        let commitHorizon = windowRange.upperBound
+        // 2. Stability is decided by the *caller*: a final (a complete
+        //    utterance) is committed forever, a partial may still be revised.
         var newStable: [TranscriptSegment] = []
         var newVolatile: [TranscriptSegment] = []
 
         for seg in fresh {
-            let mid = (seg.range.lowerBound + seg.range.upperBound) / 2
-            let stable = mid < commitHorizon
             let normalised = TranscriptSegment(
                 id: seg.id,
                 text: seg.text,
                 range: seg.range,
-                stability: stable ? .stable : .volatile,
+                stability: isFinal ? .stable : .volatile,
                 confidence: seg.confidence,
                 windowIndex: windowIndex,
                 utteranceID: utteranceID
             )
-            if stable { newStable.append(normalised) } else { newVolatile.append(normalised) }
+            if isFinal { newStable.append(normalised) } else { newVolatile.append(normalised) }
         }
 
         newStable.sort { $0.range.lowerBound < $1.range.lowerBound }

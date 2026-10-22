@@ -27,12 +27,34 @@ public enum WhisperTranscriptParser {
         public var text: String
         public var language: String           // detected language; "" when unknown
         public var durationSeconds: Double    // best-effort; 0 when unknown
+        /// Per-segment text with its time range inside the audio file.
+        /// Empty when the payload carried no usable timings.
+        public var segments: [TimedSegment]
 
-        public init(text: String, language: String, durationSeconds: Double) {
+        public init(text: String, language: String, durationSeconds: Double,
+                    segments: [TimedSegment] = []) {
             self.text = text
             self.language = language
             self.durationSeconds = durationSeconds
+            self.segments = segments
             }
+        }
+
+    /// A piece of transcript with its time range inside the audio file.
+    public struct TimedSegment: Sendable, Equatable {
+        public var text: String
+        /// Seconds from the start of the file.
+        public var start: Double
+        /// Seconds from the start of the file.
+        public var end: Double
+
+        public init(text: String, start: Double, end: Double) {
+            self.text = text
+            self.start = start
+            self.end = end
+            }
+
+        public var duration: Double { max(0, end - start) }
         }
 
         /// Reads and trims a `-otxt` transcript file. Empty string if the file is
@@ -70,8 +92,39 @@ public enum WhisperTranscriptParser {
         return ParsedMetadata(
             text: transcriptText(record, segments: segments),
             language: languageFor(record, segments: segments),
-            durationSeconds: durationOf(record, segments: segments))
+            durationSeconds: durationOf(record, segments: segments),
+            segments: timedSegments(segments))
            }
+
+        /// Per-segment text + time range, when the payload carries offsets.
+        ///
+        /// whisper.cpp writes `offsets: {from, to}` in **milliseconds**; some
+        /// releases write `timestamps: {from, to}` as clock strings
+        /// (`"00:00:00,000"`). A segment with no usable timing is skipped -
+        /// the flat transcript still covers the text.
+    private static func timedSegments(_ segments: [[String: Any]]?) -> [TimedSegment] {
+        var out: [TimedSegment] = []
+        for seg in segments ?? [] {
+            let raw = (seg["transcription"] as? String) ?? (seg["text"] as? String) ?? ""
+            let text = normalize(raw)
+            guard !text.isEmpty else { continue }
+
+            var start: Double?
+            var end: Double?
+
+            if let offsets = seg["offsets"] as? [String: Any] {
+                start = doubleValue(offsets["from"]) / 1000.0
+                end = doubleValue(offsets["to"]) / 1000.0
+            } else if let ts = seg["timestamps"] as? [String: Any] {
+                if let f = ts["from"] as? String { start = parseTimestamp(f) }
+                if let t = ts["to"] as? String { end = parseTimestamp(t) }
+            }
+
+            guard let s = start, let e = end, e > s else { continue }
+            out.append(TimedSegment(text: text, start: s, end: e))
+           }
+        return out
+        }
 
         // MARK: - text / language / duration
 

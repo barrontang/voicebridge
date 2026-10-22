@@ -106,15 +106,31 @@ public struct WindowedWhisperAdapter: StreamingWhisperBackend {
             audio: url,
             language: language,
             model: sttModel,
-            useTimestamps: false
+            // Timestamps are requested on purpose: the JSON's per-segment
+            // offsets are what lets the reconciler drop the overlap between
+            // two windows instead of guessing with word matching.
+            useTimestamps: true
         )
 
-        // The CLI backend returns a single flat transcription; wrap it in one
-        // segment spanning the full window.
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return [] }
-
         let windowDuration = Double(samples.count) / sampleRate
+
+        // Preferred: the engine's own per-segment timings, shifted into the
+        // window's absolute time base.
+        if !result.segments.isEmpty {
+            return result.segments.map { seg in
+                let lower = startTime + seg.start
+                let upper = startTime + seg.end
+                return TranscriptSegment(
+                    text: seg.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    range: lower..<max(upper, lower + 0.01),
+                    stability: hint == .final ? .stable : .volatile
+                )
+            }
+        }
+
+        // Fallback (an engine without timings): one segment for the window.
         return [
             TranscriptSegment(
                 text: text,

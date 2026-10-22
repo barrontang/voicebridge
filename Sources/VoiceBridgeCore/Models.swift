@@ -43,19 +43,24 @@ public struct Transcription: Sendable, Equatable {
     public let model: SttModel
     public let durationSeconds: Double
     public let realtimeFactor: Double   // wallclock / audio length; <1 means faster
+    /// Per-segment transcript with its time range inside the audio file.
+    /// Empty when the engine produced no usable timings (older whisper builds).
+    public let segments: [WhisperTranscriptParser.TimedSegment]
 
     public init(
         text: String,
         language: String,
         model: SttModel,
         durationSeconds: Double,
-        realtimeFactor: Double
+        realtimeFactor: Double,
+        segments: [WhisperTranscriptParser.TimedSegment] = []
     ) {
         self.text = text
         self.language = language
         self.model = model
         self.durationSeconds = durationSeconds
         self.realtimeFactor = realtimeFactor
+        self.segments = segments
     }
 
     public var isMeaningful: Bool {

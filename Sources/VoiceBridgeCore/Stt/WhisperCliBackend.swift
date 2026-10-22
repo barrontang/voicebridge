@@ -175,13 +175,17 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
             text = WhisperTranscriptParser.plainText(from: stdout)
             }
 
-          // Detect the spoken language from JSON when available.
+          // Detect the spoken language from JSON when available, and keep the
+        // per-segment timings (they are what makes live, de-duplicated
+        // captions possible).
         var detectedLanguage = language ?? "auto"
+        var timedSegments: [WhisperTranscriptParser.TimedSegment] = []
         if let jsonPath,
            let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
            let meta = WhisperTranscriptParser.parseJSON(data) {
             if !meta.text.isEmpty { text = meta.text }
             if !meta.language.isEmpty { detectedLanguage = meta.language }
+            timedSegments = meta.segments
               }
 
           // Prefer a duration measured from the source file: a model's offset can
@@ -209,6 +213,7 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
             language: detectedLanguage,
             model: model,
             durationSeconds: durationSeconds,
-            realtimeFactor: realtimeFactor)
+            realtimeFactor: realtimeFactor,
+            segments: timedSegments)
         }
 }

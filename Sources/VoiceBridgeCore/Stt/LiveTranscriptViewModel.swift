@@ -51,8 +51,14 @@ public final class LiveTranscriptViewModel: ObservableObject {
                 volatile.sort { $0.range.lowerBound < $1.range.lowerBound }
             }
         case .final(let s):
-            volatile.removeAll { $0.id == s.id }
+            // A final replaces every volatile segment of the same utterance
+            // (the ids differ: the final is a fresh transcription).
+            volatile.removeAll { seg in
+                seg.id == s.id
+                    || (seg.utteranceID != nil && seg.utteranceID == s.utteranceID)
+                }
             committed.append(s)
+            committed.sort { $0.range.lowerBound < $1.range.lowerBound }
         case .gap:
             // gap marker – insert a gap marker view at the range
             break

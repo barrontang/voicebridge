@@ -28,6 +28,11 @@ public struct UtteranceSegmenter: Sendable {
     /// Set while an utterance is open; carried into segments so the UI
     /// can diff volatile updates in place.
     public private(set) var currentUtteranceID: UUID?
+    /// When the open utterance started (absolute capture time), or nil when
+    /// no utterance is open. The live engine transcribes
+    /// `currentUtteranceStart..<now` for its partial pass, so the caption
+    /// covers the *whole* sentence rather than an arbitrary window.
+    public private(set) var currentUtteranceStart: TimeInterval?
 
     private enum State { case idle; case speaking(start: TimeInterval) }
 
@@ -44,6 +49,7 @@ public struct UtteranceSegmenter: Sendable {
                 state = .speaking(start: start)
                 silenceAccum = 0
                 currentUtteranceID = UUID()
+                currentUtteranceStart = start
                 out.append(.started(at: start))
             }
 
@@ -74,6 +80,7 @@ public struct UtteranceSegmenter: Sendable {
         guard case .speaking(let start) = state else { return nil }
         state = .idle
         silenceAccum = 0
+        currentUtteranceStart = nil
         return .ended(range: start..<time)
     }
 
