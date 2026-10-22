@@ -243,7 +243,9 @@ struct Main {
          let warn = "[privacy] \(engine.rawValue) is online: the input text is sent to a Microsoft gateway by edge-tts and is not kept on-device.\n"
          FileHandle.standardError.write(Data(warn.utf8))
              }
-        let cfg = TTSConfigManager()
+        // One-shot: selecting an engine here must not rewrite the user's
+        // saved settings (the app's choice survives a CLI smoke test).
+        let cfg = TTSConfigManager(persistChanges: false)
         cfg.selectedMode = engine
         cfg.selectedModelFile = voice
         // The in-place engine (AVSpeech) speaks *while* it synthesizes, so it
@@ -320,7 +322,7 @@ struct Main {
         print("  STT  whisper-cli : \(whisperAvailable())")
         print("  TTS  piper        : \(piperAvailable())")
         print("  TTS  edge-tts     : \(edgeAvailable())")
-        print("  TTS  fish audio   : \(fishAvailable())")
+        print("  TTS  fish audio   : \(fishStatus(roots))")
         print("  TTS  system (AVSpeech): always available")
         print("  models root   : \(roots.root.path)")
         print("  microphone    : \(micPermissionStatus())")
@@ -330,6 +332,7 @@ struct Main {
         if !piperAvailable() {
            print("Hint: `scripts/install-piper.sh` to enable Piper (offline TTS).")
              }
+         if let hint = fishHint(roots) { print(hint) }
          if micPermissionStatus().contains("denied") || micPermissionStatus().contains("notDetermined") {
             print("Hint: grant microphone access in System Settings > Privacy & Security > Microphone.")
           }
@@ -346,9 +349,24 @@ struct Main {
              FileManager.default.isExecutableFile(atPath: p) { return true }
         return locator.isAvailable("piper")
        }
-    /// A Fish Audio Drama 3 server is configured (the engine is online).
-    static func fishAvailable() -> Bool {
-        FishAudioBackend.fromEnvironment() != nil
+    /// A Fish Audio Drama 3 server is configured, and (for a local one)
+    /// whether it is actually listening.
+    static func fishStatus(_ paths: ModelPaths) -> String {
+        guard let backend = FishAudioBackend.fromEnvironment(modelRoot: paths.root) else {
+            return "false"
+        }
+        let whereName = backend.isLocal ? "local MLX" : (backend.baseURL.host ?? "remote")
+        return backend.isAvailable()
+            ? "true (\(whereName) server responding)"
+            : "configured (\(whereName)), server not running"
+    }
+
+    static func fishHint(_ paths: ModelPaths) -> String? {
+        if FishAudioBackend.localModelExists(root: paths.root) {
+            return "Hint: `scripts/start-drama3-mlx.sh` to run Drama 3 locally "
+                + "(downloaded 4-bit MLX checkpoint)."
+        }
+        return nil
     }
     static func edgeAvailable() -> Bool {
         if let p = ProcessInfo.processInfo.environment["VOICEBRIDGE_EDGE_TTS"],

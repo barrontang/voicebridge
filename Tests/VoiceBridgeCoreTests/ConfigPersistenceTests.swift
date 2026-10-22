@@ -106,4 +106,21 @@ final class ConfigPersistenceTests: XCTestCase {
         let manager = TTSConfigManager(persistURL: url)
         XCTAssertEqual(manager.selectedMode, .piper)   // the default
     }
+
+    /// The CLI's `--engine` is a one-shot choice. It must not rewrite the
+    /// engine the user picked in the app (`voicebridge-cli tts --engine fish`
+    /// used to persist "Fish Audio" into the real settings file).
+    func testAOneShotSessionNeverWritesTheSettings() {
+        let url = tempConfigURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let manager = TTSConfigManager(persistURL: url, persistChanges: false)
+        manager.selectedMode = .fishAudio
+        manager.selectedModelFile = "a-reference.wav"
+        manager.selectedSttModel = .tiny
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path),
+                       "a one-shot session must not create a settings file")
+        XCTAssertNil(manager.persist())
+    }
 }

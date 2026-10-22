@@ -315,8 +315,8 @@ struct ContentView: View {
     @MainActor
      private func speak() {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // An online engine sends the text to a remote service: ask first.
-        if ttsConfig.selectedMode.isOnline && !onlineConsentGiven {
+        // A remote engine sends the text off this Mac: ask first.
+        if ttsConfig.selectedEngineIsRemote && !onlineConsentGiven {
             pendingOnlineText = text
             return
             }

@@ -54,6 +54,10 @@ public final class TTSConfigManager: ObservableObject {
 
     // Guard against writing during the initial load().
     private var isLoaded = false
+    /// False for a one-shot session (the CLI): read the settings, but never
+    /// write them back. `tts --engine fish` must not silently change the
+    /// engine the user picked in the app.
+    private var persistChanges = true
     /// Set when the on-disk config was written by a *newer* build: we read
     /// what we understand and refuse to overwrite the newer file.
     private var configIsReadOnly = false
@@ -105,6 +109,24 @@ public final class TTSConfigManager: ObservableObject {
         VoiceBridgeEnvironment(paths: paths, binaryLocator: BinaryLocator())
          }
 
+    /// True when the selected engine would send the text off this Mac.
+    ///
+    /// Edge TTS always does. Drama 3 does only when the configured server is
+    /// not on loopback — the default local MLX server keeps everything here.
+    @MainActor public var selectedEngineIsRemote: Bool {
+        switch selectedMode {
+        case .edgeTTS:
+            return true
+        case .fishAudio:
+            guard let backend = FishAudioBackend.fromEnvironment(modelRoot: paths.root) else {
+                return false
+            }
+            return backend.requiresNetwork
+        case .system, .piper, .kokoro:
+            return false
+        }
+    }
+
          /// The canonical model root for this instance.
      nonisolated public static var defaultModelsDirectory: URL {
         ModelPaths.fromEnvironment().root
@@ -113,7 +135,7 @@ public final class TTSConfigManager: ObservableObject {
      // MARK: - persistence
 
      @discardableResult public func persist() -> URL? {
-        guard isLoaded else { return nil }
+        guard isLoaded, persistChanges else { return nil }
         guard !configIsReadOnly else {
             VBLog.models.warning("config persist skipped: the file was written by a newer VoiceBridge")
             return nil
@@ -228,7 +250,10 @@ public final class TTSConfigManager: ObservableObject {
         }
           }
 
-    public init(persistURL: URL? = nil) {
+    /// - Parameter persistChanges: set to `false` for a one-shot session
+    ///   (the CLI) whose engine/voice choice must not outlive the process.
+    public init(persistURL: URL? = nil, persistChanges: Bool = true) {
+        self.persistChanges = persistChanges
 // Initialize all stored properties from a *local* first; referencing
 // `self.paths` before every stored property is set is an error.
     let env = ModelPaths.fromEnvironment()

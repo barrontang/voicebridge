@@ -51,14 +51,16 @@ place, so an interrupted download can never look like an installed model.
 | Piper (DEFAULT) | `scripts/install-piper.sh` | ✅ | local ONNX, voices under `piper/voice/` |
 | Kokoro-82M | install a `kokoro` CLI | ✅ | local, heavy (first run ~15 s) |
 | Edge TTS | `pip install edge-tts` | ❌ | online MS voices; the app asks before sending |
-| Fish Audio Drama 3 | `sgl-omni serve --model-path fishaudio/drama-3` | ❌ | served 35B model: multi-speaker + cloning |
+| Drama 3 (local MLX) | `scripts/install-drama3-mlx.sh` | ✅ | 4-bit Apple Silicon, 23.8 GB, ~27 GB peak |
+| Drama 3 (GPU server) | `sgl-omni serve --model-path fishaudio/drama-3` | ❌ | full-precision 35B: multi-speaker + cloning |
 
 Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`.
 
-> **Privacy.** Edge TTS and Fish Audio are the online engines. The app asks for
-> confirmation before the first send and shows a notice in the status line. The
-> text is handed to the engine through a private (0600) temp file, never on the
-> command line.
+> **Privacy.** Edge TTS is always online. Drama 3 is online *only* when its
+> server is on another machine — a server on `127.0.0.1` keeps the text on this
+> Mac. The app asks for confirmation before the first remote send and shows a
+> notice in the status line. Edge TTS receives the text through a private (0600)
+> temp file, never on the command line.
 
 > **Caveat (the built-in engine in a headless CLI).** `SystemVoiceBackend`
 > speaks *in place* via `AVSpeechSynthesizer`, which delivers on the main run
@@ -68,10 +70,48 @@ Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`
 > with a clear error instead of hanging. For headless smoke tests, prefer a
 > file-producing engine (`piper`, `edgeTTS`, `kokoro`) with `--no-play`.
 
-## 2b. Fish Audio Drama 3 (served, multi-speaker)
+## 2b. Fish Audio Drama 3 (multi-speaker, voice cloning)
 
-Drama 3 is too large for a Mac, so it runs on a GPU behind an
-OpenAI-compatible endpoint:
+### Local on Apple Silicon (no GPU)
+
+```bash
+scripts/install-drama3-mlx.sh     # venv + mlx-audio[server] + the 4-bit checkpoint
+scripts/start-drama3-mlx.sh       # http://127.0.0.1:8000, Ctrl-C to stop
+```
+
+The installer is idempotent. It writes:
+
+| Path | What |
+|---|---|
+| `~/.voicebridge/venvs/mlx-audio/` | private venv with `mlx-audio[server] >= 0.6.0` |
+| `~/.voicebridge/models/tts/fish-audio-drama-3-4bit/` | the 4-bit MLX checkpoint (23.8 GB) |
+
+VoiceBridge detects a *complete* checkpoint by itself: the engine appears as
+**Fish Audio (Drama 3, local MLX)**, needs no environment variable, and keeps
+the text on the Mac (no consent sheet). A partially downloaded checkpoint is
+ignored — the engine falls back to the built-in voice.
+
+Measured on an M4 Pro / 64 GB (macOS 27), 44.1 kHz mono output:
+
+| Case | Time |
+|---|---|
+| first request (loads ~22 GB) | ~29 s |
+| warm, 3.8 s clip | ~2 s |
+| warm, 15 s multi-speaker dialogue | ~13 s |
+| MLX peak memory | 27.1 GB |
+
+macOS may page the weights out when the server is idle — they are file-backed
+mmap pages, not a leak — so the next request is slower while they fault back
+in. The server keeps the loaded model in `/v1/models` regardless.
+
+Change the port (e.g. 8000 is taken):
+
+```bash
+VOICEBRIDGE_DRAMA_PORT=8001 scripts/start-drama3-mlx.sh
+export VOICEBRIDGE_FISH_TTS=http://127.0.0.1:8001
+```
+
+### Remote on a GPU
 
 ```bash
 # SGLang-Omni (or vLLM-Omni - see the Drama 3 recipes)
@@ -82,13 +122,8 @@ hf download fishaudio/drama-3            # 37 GB (FP8 experts)
 sgl-omni serve --model-path fishaudio/drama-3 --port 8000
 ```
 
-Point VoiceBridge at it:
-
 ```bash
-export VOICEBRIDGE_FISH_TTS=http://127.0.0.1:8000
-# voice cloning (the server needs the reference transcript too):
-export VOICEBRIDGE_FISH_REFERENCE=/path/to/reference.wav
-export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
+export VOICEBRIDGE_FISH_TTS=http://gpu-box:8000
 ```
 
 ```bash
@@ -97,13 +132,22 @@ export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
 
 | Variable | Meaning |
 |---|---|
-| `VOICEBRIDGE_FISH_TTS` | the server's base URL (the engine is only offered when this is set) |
+| `VOICEBRIDGE_FISH_TTS` | the server's base URL (defaults to the local MLX server when a checkpoint is installed) |
+| `VOICEBRIDGE_FISH_MODEL` | the model name/path sent to the server (defaults to the local checkpoint path) |
 | `VOICEBRIDGE_FISH_REFERENCE` | a reference clip (local path or URL) for voice cloning |
 | `VOICEBRIDGE_FISH_REFERENCE_TEXT` | the transcript of that clip |
 | `VOICEBRIDGE_FISH_API_KEY` | bearer token, if the server wants one |
 
-Without `VOICEBRIDGE_FISH_TTS` the engine reports itself unavailable and the
-manager falls back to the built-in voice (and says so).
+`voicebridge-cli ping` shows which case is active:
+
+```text
+  TTS  fish audio   : true (local MLX server responding)
+  TTS  fish audio   : configured (local MLX), server not running
+  TTS  fish audio   : false
+```
+
+Without a configured server or a complete checkpoint the engine reports itself
+unavailable and the manager falls back to the built-in voice (and says so).
 
 ## 3. Build and smoke test
 

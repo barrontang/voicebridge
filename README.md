@@ -36,15 +36,15 @@
   - **Piper** (default) — local ONNX, offline, natural-sounding.
   - **Kokoro** — high-quality local TTS runtime.
   - **Microsoft Edge-TTS** — online premium voices (asks before sending your text).
-  - **Fish Audio Drama 3** — a served 35B MoE model: multi-speaker (16 characters),
-    voice cloning and long-form chunking. Talks to a local `sgl-omni` / `vllm-omni`
-    server (asks before sending your text).
+  - **Fish Audio Drama 3** — a 35B MoE model: multi-speaker (16 characters), voice
+    cloning and long-form chunking. Runs **locally** from a 4-bit MLX checkpoint on
+    Apple Silicon (~27 GB peak), or against a GPU server (asks before sending).
   - **AVSpeechSynthesizer** — built-in system voice, always-available fallback.
 - **⬇️ One-click model install** — download whisper models and Piper voices from the Settings page
   (progress, disk-space check, checksum, crash-safe writes). No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  94 unit tests run in CI in under a second.
+  126 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -89,28 +89,39 @@ brew install whisper-cpp                 # the STT engine
 
 ### Fish Audio Drama 3 (multi-speaker, voice cloning)
 
-Drama 3 is a 35B MoE model (37 GB of weights, 3B active per token) — it needs an
-NVIDIA GPU, so it is *served* and VoiceBridge talks to it over HTTP:
+Drama 3 is a 35B MoE model (3B active per token) with 16 speaker tags
+(`<|speaker:0|>` … `<|speaker:15|>`), voice cloning and long-form chunking.
+On Apple Silicon it runs **locally** from the community 4-bit MLX conversion
+(23.8 GB on disk, ~27 GB peak) — no GPU and no cloud:
 
 ```bash
-# 1. serve the model (SGLang-Omni, or vLLM-Omni)
-uv pip install --prerelease=allow -v -e ".[fishaudio]"      # from the sglang-omni repo
-hf download fishaudio/drama-3                               # or fishaudio/drama-3-int4
-sgl-omni serve --model-path fishaudio/drama-3 --port 8000
-
-# 2. point VoiceBridge at it
-export VOICEBRIDGE_FISH_TTS=http://127.0.0.1:8000
-# optional: clone a voice from a reference clip
-export VOICEBRIDGE_FISH_REFERENCE=/path/to/reference.wav
-export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
-
-# 3. use it
-.build/release/voicebridge-cli tts --text "<|speaker:1|> Hello." --engine fish
+scripts/install-drama3-mlx.sh     # private venv + mlx-audio + the checkpoint
+scripts/start-drama3-mlx.sh       # the server on 127.0.0.1:8000
 ```
 
-The engine supports Drama 3's speaker tags (`<|speaker:0|>` … `<|speaker:15|>`)
-directly in the text. It is an *online* engine for VoiceBridge's privacy model
-(the text goes to an HTTP service), so the app asks before the first send.
+VoiceBridge finds the downloaded checkpoint on its own and lists the engine as
+**Fish Audio (Drama 3, local MLX)** — text never leaves the Mac, so there is no
+consent sheet. Measured on an M4 Pro (64 GB): the first request takes ~29 s
+(it loads the weights), then a 4 s clip takes ~2 s and 15 s of multi-speaker
+dialogue ~13 s, at 44.1 kHz mono.
+
+The full-precision model can also be served on a GPU with SGLang-Omni or
+vLLM-Omni; point `VOICEBRIDGE_FISH_TTS` at that machine instead:
+
+```bash
+uv pip install --prerelease=allow -v -e ".[fishaudio]"   # from the sglang-omni repo
+hf download fishaudio/drama-3                            # or fishaudio/drama-3-int4
+sgl-omni serve --model-path fishaudio/drama-3 --port 8000
+export VOICEBRIDGE_FISH_TTS=http://gpu-box:8000
+```
+
+Speaker tags go straight in the text, and a reference clip clones a voice:
+
+```bash
+export VOICEBRIDGE_FISH_REFERENCE=/path/to/reference.wav
+export VOICEBRIDGE_FISH_REFERENCE_TEXT="the transcript of that clip"
+voicebridge-cli tts --text "<|speaker:0|> Are you coming? <|speaker:1|> One minute." --engine fish
+```
 
 ---
 
@@ -191,10 +202,11 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
 
 - The microphone audio **never leaves the machine**.
 - Piper, Kokoro and the built-in voice run entirely offline.
-- **Edge TTS and Fish Audio are the online engines.** The app asks before the first send
-  and shows a notice in the status line; for Edge TTS the text is passed to the engine
-  through a private temp file (never on the command line). A Fish Audio server is usually
-  local (`127.0.0.1`), but VoiceBridge cannot know that — so it asks either way.
+- **Edge TTS is online; Drama 3 is online only when its server is.** The app asks
+  before the first send and shows a notice in the status line. A Drama 3 server on
+  `127.0.0.1` keeps the text on this Mac and needs no consent; a server on another
+  machine does. Edge TTS receives the text through a private temp file (never on the
+  command line).
 - Settings live in `~/Library/Application Support/VoiceBridge/config.json` — no telemetry,
   no analytics, no network calls of any kind.
 

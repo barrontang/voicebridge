@@ -136,9 +136,11 @@ three bugs. They now both use `ProcessRunner`:
 - **`TTSBackend`** — `synthesize(text:voice:outputPath:)`, `producesAudioFile`,
   `isAvailable()`, `displayName`, `requiresNetwork`, `preferredFileExtension`.
   Shipped impls: `PiperBackend`, `KokoroBackend`, `EdgeTTSBackend`,
-  `FishAudioBackend` (Fish Audio Drama 3 — a *served* 35B MoE model behind an
+  `FishAudioBackend` (Fish Audio Drama 3 — a 35B MoE model behind an
   OpenAI-compatible `/v1/audio/speech` endpoint: multi-speaker and voice
-  cloning; not offline, so the consent flow treats it like Edge TTS),
+  cloning. The default is the 4-bit MLX checkpoint on `127.0.0.1`, which keeps
+  the text on-device; a server on another machine is treated like Edge TTS by
+  the consent flow, driven by `FishAudioBackend.requiresNetwork`),
   `SystemVoiceBackend`.
 
 `TTSManager.speak(...)` picks the engine, applies **graceful fallback**

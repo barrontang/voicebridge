@@ -103,9 +103,9 @@ public struct TTSManager {
              // (edge-tts), tell the user their text is transiting Microsoft
              // servers. This is the P1 "loudly warn it's online" item.
             if engine.requiresNetwork {
-                 VBLog.tts.warning("privacy: \"\(engine.displayName)\" is online — the input")
-                 VBLog.tts.warning("text is sent to a remote service by edge-tts, not kept on-device;")
-                 VBLog.tts.warning("switch to a local engine (Piper/Kokoro/System) for offline TTS.")
+                 VBLog.tts.warning("privacy: \"\(engine.displayName)\" is remote — the")
+                 VBLog.tts.warning("text leaves this Mac; switch to a local engine")
+                 VBLog.tts.warning("(Piper/Kokoro/System, or a local Drama 3 server) for offline TTS.")
                  }
         // In-place engines (AVSpeech) *speak while synthesizing* - there is no
         // file to produce. Asking for synthesis without playback would still
@@ -214,9 +214,10 @@ public struct TTSManager {
                                binaryLocator: env.binaryLocator,
                               binaryOverride: raw)
         case .fishAudio:
-            // Only available when a server is configured; otherwise the
-            // manager falls back to the built-in voice (and says so).
-            if let configured = FishAudioBackend.fromEnvironment() {
+            // A configured server, or the local 4-bit MLX checkpoint; with
+            // neither, the manager falls back to the built-in voice.
+            if let configured = FishAudioBackend.fromEnvironment(
+                modelRoot: env.paths.root) {
                 return configured
                 }
             return FishAudioBackend.unconfigured()
