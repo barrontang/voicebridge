@@ -3,6 +3,7 @@
 Build/
 *.xcodeproj/xcuserdata/
 DerivedData/
+.swiftpm/
 
 # Model root is a user-space dir; keep it out of the repo.
 .voicebridge/
@@ -15,6 +16,7 @@ models/
 
 # Local-only files (never commit)
 weibo.md
+.workbuddy/
 
 # Python (Piper runtime lives in the user env, not the repo)
 __pycache__/

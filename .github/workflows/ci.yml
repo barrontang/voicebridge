@@ -6,20 +6,52 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Swift Build
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Swift Build (release)
         run: swift build -c release
+
       - name: Swift Test
         run: swift test
-       - name: No printf/`print(` in Core (Finding 5)
+
+      - name: No print( in Core (Finding 5)
         # Diagnostic output must go through os.Logger (VBLog); nothing in Core
         # may write to stdout except the CLI's explicit user-facing path.
         run: |
-          if grep -rn 'print(' Sources/VoiceBridgeCore --include='*.swift' \
-              | grep -v '/VBLog.swift' | grep -v '///'; then
+          if grep -rnE '\bprint[[:space:]]*\(' Sources/VoiceBridgeCore --include='*.swift' \
+              | grep -v '/VBLog.swift' | grep -vE '^\S+:[0-9]+:[[:space:]]*///'; then
             echo "::error::Core writes to stdout; route diagnostics through VBLog."; exit 1
           fi
+
+      - name: No force-unwraps in Core
+        # A force-unwrap in the core turns a recoverable engine error into a
+        # crash; the CLI/UI may use them at the top level.
+        run: |
+          if grep -rnE '[A-Za-z0-9_)]!([.,;)]|$)' Sources/VoiceBridgeCore --include='*.swift' \
+              | grep -vE '^\S+:[0-9]+:[[:space:]]*///'; then
+            echo "::error::Force-unwrap found in Core."; exit 1
+          fi
+
+  lint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate workflow YAML
+        run: ruby -ryaml -e 'YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'
+
+      - name: actionlint
+        uses: rhysd/actionlint@v1
+        with:
+          shell: bash

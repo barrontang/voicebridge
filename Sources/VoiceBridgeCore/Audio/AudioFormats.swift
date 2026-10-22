@@ -22,8 +22,12 @@ public enum AudioFormats {
       }
 
        /// Convenience `AVAudioFormat` object for converters.
-    public static var targetFormat: AVAudioFormat {
-        AVAudioFormat(commonFormat: .pcmFormatInt16,
-                     sampleRate: 16_000, channels: 1, interleaved: true)!
+    ///
+    /// Failable in Apple's API (`init?(standardFormatWithSampleRate:channels:)`),
+    /// so it is surfaced as an optional rather than force-unwrapped — a Core
+    /// force-unwrap is a crash waiting for a bad host configuration. The 16-bit
+    /// PCM *shape* itself is described by `target` (the settings dictionary).
+    public static var targetFormat: AVAudioFormat? {
+        AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)
          }
 }

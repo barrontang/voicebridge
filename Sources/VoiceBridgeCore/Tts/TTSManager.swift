@@ -146,9 +146,12 @@ public struct TTSManager {
         case .system:
             return SystemVoiceBackend()
         case .piper:
+              // A voice that looks like a path is used as a directory hint
+             // (the caller pointed at a specific folder); otherwise the voice
+             // lives in the configured root's `piper/voice` directory.
              let dir = (voice?.contains("/") == true)
-                       ? URL(fileURLWithPath: voice!)
-                       : env.paths.piperVoiceDir
+                        ? URL(fileURLWithPath: voice ?? "")
+                        : env.paths.piperVoiceDir
             let raw = ProcessInfo.processInfo.environment["VOICEBRIDGE_PIPER"]
             return PiperBackend(modelDirectory: dir,
                               binaryLocator: env.binaryLocator,
