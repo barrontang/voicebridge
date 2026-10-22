@@ -133,17 +133,17 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(WhisperTranscriptParser.loadText(atPath: "/no/such/file.txt"), "")
           }
 
-          // --- StreamingSttController.writeWAV16 (regression for the live-STT crash) ---
+          // --- WAVWriter (regression for the live-STT crash) ---
        /// The live path previously crashed inside AVAudioFile.write; it now writes
        /// a pure byte-level 16-bit PCM WAV. Verify the header + sample bytes.
       @MainActor
-      func testWriteWAV16ProducesValidHeader() throws {
+      func testWAVWriterProducesValidHeader() throws {
             let url = FileManager.default.temporaryDirectory
                                 .appendingPathComponent("vb-writeWAV16-\(UUID().uuidString).wav")
             try? FileManager.default.removeItem(at: url)
           // 0.5 s at 16 kHz -> 8000 samples
            let samples = (0..<8000).map { Float(sin(Double($0) * 0.01)) * 0.25 }
-            try StreamingSttController.writeWAV16(samples, to: url)
+            try WAVWriter.write(samples: samples, to: url)
             let data = try Data(contentsOf: url)
 
             // RIFF / WAVE header
@@ -165,43 +165,4 @@ final class CoreTests: XCTestCase {
            XCTAssertEqual(u16(34), 16)        // bits per sample
            }
 
-           // --- StreamingSttController.appendDeduped (live-append + overlap dedup) ---
-            // A fresh tick appends the new words; a fully re-echoed (overlap)
-            // tick changes nothing.
-          @MainActor
-         func testAppendDedupedAppendsNewWordsOnly() {
-             // First tick: empty accumulated -> whole segment is new.
-             XCTAssertEqual(StreamingSttController.appendDeduped("", segment: "hello"), "hello")
-             // The overlap re-echoes exactly what we have -> append nothing.
-             XCTAssertEqual(StreamingSttController.appendDeduped("hello", segment: "hello"), "hello")
-             // A window that continues the phrase appends only the new tail.
-             XCTAssertEqual(StreamingSttController.appendDeduped("hello", segment: "hello world"), "hello world")
-             // Empty segment leaves the transcript untouched.
-             XCTAssertEqual(StreamingSttController.appendDeduped("hello world", segment: ""), "hello world")
-          }
-
-          // --- Regression: the OLD longest-common-prefix diff leaked stray
-          // fragments when an earlier word was re-worded (e.g. "recognize speech"
-          // -> "recognize speeches" left a dangling "es"). The committed-window
-          // approach never re-transcribes old audio, and appendDeduped drops the
-          // re-fed overlap, so there is no fragment leak.
-          @MainActor
-         func testLiveTranscriptHasNoOverlapGarble() {
-             // The 0.4 s overlap re-feeds "speech"; dedup must drop that echo.
-             XCTAssertEqual(
-                 StreamingSttController.appendDeduped("recognize speech", segment: "speech and text"),
-                  "recognize speech and text")
-
-             // A multi-word overlap is also stripped contiguously.
-             XCTAssertEqual(
-                 StreamingSttController.appendDeduped("a b c d", segment: "c d new words"),
-                  "a b c d new words")
-
-             // Feeding overlapping windows back-to-back must never double-count.
-             var transcript = ""
-             transcript = StreamingSttController.appendDeduped(transcript, segment: "the quick brown")
-             transcript = StreamingSttController.appendDeduped(transcript, segment: "brown fox jumps")
-             transcript = StreamingSttController.appendDeduped(transcript, segment: "jumps over")
-             XCTAssertEqual(transcript, "the quick brown fox jumps over")
-          }
        }

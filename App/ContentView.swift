@@ -33,11 +33,13 @@ struct ContentView: View {
      @State private var lastWav: URL?             // for "Save .wav..."
 
      // - STT -
-     @State private var mic: MicrophoneCapture?
      @State private var sttPhase: SttPhase = .idle
      @State private var sttStatus = "Ready."
      @State private var sttModel: SttModel?
-     @StateObject private var stream = StreamingSttController(model: .tiny)
+     /// The live-caption session (mic -> router -> whisper -> transcript).
+     @StateObject private var live = LiveSttSession()
+     /// The push-to-talk recorder (mic -> router -> 16 kHz WAV).
+     @StateObject private var recorder = PushToTalkSession()
 
     var body: some View {
         ScrollView {
@@ -135,18 +137,18 @@ struct ContentView: View {
                          Label(pushToTalkTitle, systemImage: pushToTalkIcon)
                           }
                           .buttonStyle(.borderedProminent)
-                          .disabled(stream.isRunning || pushToTalkDisabled)
+                          .disabled(live.isRunning || pushToTalkDisabled)
                           .help("Record a short clip and transcribe on demand.")
 
                       // Live / streaming.
                      Button {
                           toggleLive()
                          } label: {
-                         Label(stream.isRunning ? "Stop Live" : "Live (streaming)",
-                               systemImage: stream.isRunning ? "stop.circle" : "dot.radiowaves.left.and.right")
+                         Label(live.isRunning ? "Stop Live" : "Live (streaming)",
+                               systemImage: live.isRunning ? "stop.circle" : "dot.radiowaves.left.and.right")
                           }
                           .buttonStyle(.borderedProminent)
-                          .disabled(stream.isRunning && stream.phase == .stopping)
+                          .disabled(live.isRunning && live.phase == .stopping)
                           .help("Continuous live captions via whisper (whisper-cli).")
 
                   }
@@ -223,7 +225,7 @@ struct ContentView: View {
      /// The active transcript to display: live when streaming, otherwise the
      /// last push-to-talk result.
     private var displayTranscript: String {
-        if stream.isRunning { return stream.transcript }
+        if live.isRunning { return live.transcript }
         return lastPushToTalkTranscript
     }
 
@@ -231,20 +233,20 @@ struct ContentView: View {
 
      /// "Ready" / "Transcribing…" / "Live" / "Microphone denied…", etc.
     private var displaySttStatus: String {
-        if stream.isRunning { return stream.status }
+        if live.isRunning { return live.status }
         return sttStatus
     }
 
      /// A short model / status legend under the transcript.
     private var legend: String {
         guard let m = sttModel else { return "(no model)" }
-        let live = stream.isRunning ? " · LIVE" : ""
+        let live = live.isRunning ? " · LIVE" : ""
         return "\(m.label) / \(m.ggmlFilename)\(live)"
     }
 
      /// Disable the push-to-talk button when live or busy already.
     private var pushToTalkDisabled: Bool {
-        stream.isRunning || sttPhase == .requestingMic || sttPhase == .transcribing
+        live.isRunning || sttPhase == .requestingMic || sttPhase == .transcribing
     }
 
     private var pushToTalkTitle: String {
@@ -358,12 +360,7 @@ struct ContentView: View {
         sttPhase = .requestingMic
         sttStatus = "Requesting microphone access…"
         Task {
-            let granted: Bool = await withCheckedContinuation { cont in
-                var resumed = false
-                MicrophoneCapture.requestInputPermission { g in
-                    if !resumed { resumed = true; cont.resume(returning: g) }
-                }
-            }
+            let granted = await PushToTalkSession.requestPermission()
             guard granted else {
                 sttPhase = .idle
                 sttStatus = "Microphone denied - enable in System Settings > Privacy & Security > Microphone."
@@ -378,45 +375,38 @@ struct ContentView: View {
         let dir = ttsConfig.paths.cacheDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("mic-\(UUID().uuidString).wav")
-        do {
-            let cap = try MicrophoneCapture(outputURL: url)
-            try cap.start()
-            mic = cap
-            sttPhase = .recording
-            sttStatus = "Recording with \(voice.label). Click \"Stop & Transcribe\"."
-        } catch {
-            mic = nil
-            sttPhase = .idle
-            sttStatus = "Could not start the mic: \(error.localizedDescription)"
+        Task {
+            do {
+                try await recorder.start(url: url)
+                sttPhase = .recording
+                sttStatus = "Recording with \(voice.label). Click \"Stop & Transcribe\"."
+            } catch {
+                sttPhase = .idle
+                sttStatus = "Could not start the mic: \(error.localizedDescription)"
+            }
         }
      }
 
      @MainActor
      private func stopAndTranscribe() {
-        // Capture the written WAV URL *from the binding* before we nil it out.
-        // (This was the "No audio to transcribe" bug: reading `mic?.writtenURL`
-        //  after setting `mic = nil` always fell back to a non-existent path.)
-        var audioURL = ttsConfig.paths.cacheDir.appendingPathComponent("last-mic.wav")
-        if let cap = mic {
-            audioURL = cap.writtenURL   // mic's outputPath, flushed in stop()
-            cap.stop()
-            mic = nil
-        }
+        // The recorder finalizes its WAV on stop, so the file on disk is
+        // complete the moment this returns (no "sleep and hope it flushed").
+        let audioURL = (try? recorder.stop()) ?? recorder.outputURL
         sttPhase = .transcribing
         sttStatus = "Transcribing…"
 
         let model = sttModel ?? availableSttModel()
         Task {
             do {
-                 // AVAudioRecorder may need a beat to flush its final frames.
-                try? await Task.sleep(for: .milliseconds(300))
-                guard let model,
+                guard let model, let audioURL,
                       FileManager.default.fileExists(atPath: audioURL.path) else {
                     sttPhase = .idle
                     sttStatus = "No audio on disk - check mic & permission."
                     return
                 }
-                let t = try await WhisperCliBackend()
+                   // The backend must resolve models from the *configured*
+                   // root, not the built-in default.
+                let t = try await WhisperCliBackend(modelDirectory: ttsConfig.paths.whisperDir)
                                .transcribe(audio: audioURL,
                                           language: nil,
                                           model: model,
@@ -436,16 +426,16 @@ struct ContentView: View {
      /// Toggle live streaming STT (start if idle, stop if live).
      @MainActor
      private func toggleLive() {
-        switch stream.phase {
+        switch live.phase {
         case .idle:
             if sttModel == nil {
                 sttStatus = "No whisper model on disk - run scripts/fetch-whisper-turbo.sh."
                 return
             }
             lastPushToTalkTranscript = ""   // clear the view; live will drive displayTranscript
-            Task { await stream.start() }
+            Task { await live.start() }
         case .live:
-            Task { await stream.stop() }
+            Task { await live.stop() }
             sttStatus = "Stopping live…"
         case .stopping:
             // already stopping - ignore.
@@ -490,7 +480,11 @@ struct ContentView: View {
                  ? requested
                             : availableSttModel()
         sttModel = chosen
-        // The live stream keeps its own model; sync it when not in a session.
-        stream.useModel(chosen ?? .tiny)
+        // The live session keeps its own model + folders; sync it when it is
+        // not running (the settings page can change the model folder).
+        live.apply(LiveSttSession.Configuration(
+            model: chosen ?? .tiny,
+            modelDirectory: ttsConfig.paths.whisperDir,
+            scratchDir: ttsConfig.paths.cacheDir))
        }
 }
