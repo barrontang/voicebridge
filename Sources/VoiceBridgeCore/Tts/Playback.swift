@@ -1,9 +1,8 @@
 import Foundation
 import AVFoundation
 
-/// Audio playback. `playWAV` plays a file and keeps the run loop alive so it
-/// works both in a long-lived GUI app and a short-lived CLI. `spinMainRunLoop`
-/// keeps the loop alive for an in-place (AVSpeech) engine. Both guard against
+/// Audio playback. `playAudio` plays a file and keeps the run loop alive so it
+/// works both in a long-lived GUI app and a short-lived CLI. It guards against
 /// missing files, so a no-output engine can't crash the pipeline.
 ///
 /// GUI note: when the main run loop is *already running* (a SwiftUI app),
@@ -76,19 +75,6 @@ public enum Playback {
             }
         current = nil
              }
-
-            /// Spins the main run loop for `seconds` so an in-place AVSpeech
-             /// utterance has time to deliver before a CLI process would otherwise
-             /// exit. In a GUI app the loop is already running, so this is a no-op.
-         @MainActor
-    public static func spinMainRunLoop(for seconds: Double) {
-            // GUI: the loop is already running — nothing more to do.
-           guard !assumesRunningLoop else { return }
-        let end = Date().addingTimeInterval(seconds)
-        while Date() < end {
-                RunLoop.current.run(until: end)
-           }
-           }
 
            /// Registers an in-place AVSpeech synthesizer as the current sound
             /// source so `stopAll()` can halt it.

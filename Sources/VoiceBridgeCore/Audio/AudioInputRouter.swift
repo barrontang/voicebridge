@@ -223,7 +223,9 @@ public final class AudioInputRouter: @unchecked Sendable {
             scratch[i] = acc / Float(channelCount)
            }
         scratch.withUnsafeBufferPointer { buf in
-            ring.write(buf.baseAddress!, count: frames)
+            if let base = buf.baseAddress {
+                ring.write(base, count: frames)
+            }
         }
     }
 

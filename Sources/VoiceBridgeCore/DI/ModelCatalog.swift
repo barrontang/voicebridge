@@ -73,6 +73,16 @@ public enum ModelCatalog {
     private static let whisperBase = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
     private static let piperBase = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
+       /// A URL built from a literal. A malformed literal is a programming
+       /// error (not a runtime condition), so it traps instead of silently
+       /// producing an unusable URL.
+    private static func url(_ string: String) -> URL {
+        guard let parsed = URL(string: string) else {
+            preconditionFailure("VoiceBridge: malformed URL in the model catalog: \(string)")
+            }
+        return parsed
+        }
+
     /// whisper.cpp speech-to-text models.
     public static let stt: [DownloadableModel] = [
         DownloadableModel(
@@ -81,7 +91,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-large-v3-turbo.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-large-v3-turbo.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-large-v3-turbo.bin"),
             byteSize: 1_752_944_432),
         DownloadableModel(
             id: "large-v3",
@@ -89,7 +99,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-large-v3.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-large-v3.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-large-v3.bin"),
             byteSize: 3_087_659_584),
         DownloadableModel(
             id: "medium",
@@ -97,7 +107,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-medium.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-medium.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-medium.bin"),
             byteSize: 1_516_533_520),
         DownloadableModel(
             id: "small",
@@ -105,7 +115,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-small.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-small.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-small.bin"),
             byteSize: 485_557_560),
         DownloadableModel(
             id: "base",
@@ -113,7 +123,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-base.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-base.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-base.bin"),
             byteSize: 75_520_216),
         DownloadableModel(
             id: "tiny",
@@ -121,7 +131,7 @@ public enum ModelCatalog {
             kind: .stt,
             fileName: "ggml-tiny.bin",
             relativeDirectory: "whisper",
-            remoteURL: URL(string: "\(whisperBase)/ggml-tiny.bin")!,
+            remoteURL: url("\(whisperBase)/ggml-tiny.bin"),
             byteSize: 75_243_368),
     ]
 
@@ -136,12 +146,12 @@ public enum ModelCatalog {
             kind: .tts,
             fileName: "en_US-lessac-medium.onnx",
             relativeDirectory: "piper/voice",
-            remoteURL: URL(string: "\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx")!,
+            remoteURL: url("\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx"),
             byteSize: 63_214_376,
             companions: [
                 DownloadableModel.Companion(
                     fileName: "en_US-lessac-medium.onnx.json",
-                    remoteURL: URL(string: "\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json")!)
+                    remoteURL: url("\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"))
             ]),
         DownloadableModel(
             id: "en_US-amy-medium",
@@ -149,12 +159,12 @@ public enum ModelCatalog {
             kind: .tts,
             fileName: "en_US-amy-medium.onnx",
             relativeDirectory: "piper/voice",
-            remoteURL: URL(string: "\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx")!,
+            remoteURL: url("\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx"),
             byteSize: 63_213_112,
             companions: [
                 DownloadableModel.Companion(
                     fileName: "en_US-amy-medium.onnx.json",
-                    remoteURL: URL(string: "\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx.json")!)
+                    remoteURL: url("\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx.json"))
             ]),
         DownloadableModel(
             id: "zh_CN-huayan-medium",
@@ -162,12 +172,12 @@ public enum ModelCatalog {
             kind: .tts,
             fileName: "zh_CN-huayan-medium.onnx",
             relativeDirectory: "piper/voice",
-            remoteURL: URL(string: "\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx")!,
+            remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx"),
             byteSize: 63_212_888,
             companions: [
                 DownloadableModel.Companion(
                     fileName: "zh_CN-huayan-medium.onnx.json",
-                    remoteURL: URL(string: "\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json")!)
+                    remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json"))
             ]),
     ]
 

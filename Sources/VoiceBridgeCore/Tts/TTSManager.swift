@@ -182,13 +182,6 @@ public struct TTSManager {
         return "“\(engine.displayName)” is online: the text was sent to a remote service."
         }
 
-           // Rough speaking-time estimate (~2.5 words/sec), kept for callers that
-    /// want to size their own timeout around an in-place utterance.
-    public static func estimatedSeconds(_ text: String) -> Double {
-        let words = text.split { $0 == " " || $0 == "\n" }.count
-        return max(1.5, Double(words) / 2.5 + 0.75)
-         }
-
            // The production engine factory. Paths come from `env` (the
            // configured root), never a static.
     public static let defaultEngineFactory: EngineFactory = { mode, voice, env in
