@@ -90,7 +90,8 @@ struct ContentView: View {
                     Button {
                         saveWav()
                        } label: {
-                       Label("Save Speech (.wav)", systemImage: "square.and.arrow.down")
+                       Label("Save Speech (\(lastWav?.pathExtension.uppercased() ?? "audio"))",
+                              systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.bordered)
                         .disabled(lastWav == nil)
@@ -284,7 +285,9 @@ struct ContentView: View {
                   var s = "Playing \(result.url.lastPathComponent) - \(result.engineName)"
                   if result.fellBack { s += "   (\(result.statusLine))" }
                   ttsStatus = s
-                  lastWav = result.url
+                     // Only a real audio file can be saved; the in-place
+                     // (AVSpeech) engine produces no file at all.
+                  lastWav = result.hasAudioFile ? result.url : nil
                   }
             } catch {
                 if !Task.isCancelled {
@@ -317,7 +320,8 @@ struct ContentView: View {
           ttsStatus = "No .wav to save yet."
           return
      }
-     let defaultName = "voicebridge-\(Date().timeIntervalSince1970).wav"
+     let ext = url.pathExtension.isEmpty ? "wav" : url.pathExtension
+     let defaultName = "voicebridge-\(Date().timeIntervalSince1970).\(ext)"
      if let chosen = SaveDialog.save(data, defaultName: defaultName) {
          ttsStatus = "Saved WAV to \(chosen.lastPathComponent)."
          } else {

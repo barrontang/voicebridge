@@ -45,7 +45,7 @@ public enum Playback {
            /// Plays `url`. A missing/unopenable file is a no-op (not a crash).
             /// Any playback already in progress is stopped first.
         @MainActor
-    public static func playWAV(_ url: URL) throws {
+    public static func playAudio(_ url: URL) throws {
         stopAll() // replace anything already sounding
 
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -95,5 +95,12 @@ public enum Playback {
          @MainActor
     public static func registerSynthesizer(_ synth: AVSpeechSynthesizer) {
              currentSynth = synth
+        }
+
+           /// Backwards-compatible alias for `playAudio` (the player handles
+           /// WAV and MP3 alike).
+        @MainActor
+    public static func playWAV(_ url: URL) throws {
+        try playAudio(url)
         }
 }

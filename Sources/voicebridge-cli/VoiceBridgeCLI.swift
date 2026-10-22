@@ -115,8 +115,12 @@ struct Main {
         //    * `--stdin` / `-` / `--text -` reads STDIN (agent-piped output);
         //    * a bare pipe with no flag speaks whatever is piped in;
         //    * an interactive terminal with no text keeps the demo string.
+        //
+        // The "bare pipe" case only reads STDIN when data is *actually*
+        // waiting: a script that runs the CLI with an inherited, idle stdin
+        // (no TTY, no bytes) used to block forever on readDataToEndOfFile.
         if useStdin { text = readAllStdin() }
-        else if !textGiven && !isInteractiveStdin() { text = readAllStdin() }
+        else if !textGiven && stdinHasData() { text = readAllStdin() }
 
           // A call that expected a pipe but nothing arrived should not hear the demo.
         if !textGiven && (useStdin || !isInteractiveStdin()),
@@ -134,28 +138,43 @@ struct Main {
         let cfg = TTSConfigManager()
         cfg.selectedMode = engine
         cfg.selectedModelFile = voice
-        // Always synthesize with play:false, then play via a reliable path below
-         // (avoids AVAudioPlayer's runloop-spin hanging a headless CLI).
+        // The in-place engine (AVSpeech) speaks *while* it synthesizes, so it
+        // is only asked to play when playback was requested. A file-producing
+        // engine is synthesized with `play: false` and played afterwards
+        // through `afplay` (see below).
+        let inPlace = engine == .system
         let result = try await TTSManager(config: cfg)
-                       .speak(text, mode: engine, voice: voice, play: false)
-        print("output: \(result.url.path)")
-      if result.fellBack { print("\(result.statusLine)") }
+                       .speak(text, mode: engine, voice: voice, play: inPlace && !noPlay)
+        if result.fellBack { print("\(result.statusLine)") }
+        if result.hasAudioFile { print("output: \(result.url.path)") }
 
         if !noPlay {
-            if engine == .system {
-                // Built-in engine speaks in place (no file). Re-speak with play.
-               try await TTSManager(config: cfg)
-                           .speak(text, mode: .system, voice: voice, play: true)
-                 } else if FileManager.default.fileExists(atPath: result.url.path) {
-                // afplay blocks until playback completes — robust in a CLI.
-                _ = try await Shell.run(at: ProcessInfo.processInfo.environment["AFPLAY"] ?? "afplay",
-                                      arguments: [result.url.path])
-                print("✓ played via afplay")
-                 } else {
+            if inPlace {
+                // Already spoken in place; nothing to play.
+            } else if result.hasAudioFile {
+                try await playFile(result.url)
+            } else {
                 print("[no on-disk audio to play; run with --no-play to skip]")
                  }
           }
         }
+
+       /// Play a generated audio file from a headless CLI.
+       ///
+       /// `afplay` is the reliable path (it blocks until the audio finishes and
+       /// needs no run loop). It has to be resolved to an **absolute** path:
+       /// `Process` does not search `$PATH`, so a bare "afplay" would fail to
+       /// launch. When `afplay` isn't available we fall back to the in-process
+       /// player.
+    static func playFile(_ url: URL) async throws {
+        if let afplay = BinaryLocator().locate("afplay") {
+            _ = try await Shell.run(at: afplay, arguments: [url.path])
+            print("✓ played via afplay")
+        } else {
+            try Playback.playAudio(url)
+            print("✓ played in-process")
+        }
+    }
 
 // MARK: - helpers
 
@@ -170,6 +189,18 @@ struct Main {
     static func isInteractiveStdin() -> Bool {
         isatty(FileHandle.standardInput.fileDescriptor) == 1
        }
+
+       /// True when STDIN has bytes (or is at EOF) ready to be read *right
+       /// now*. A zero-timeout `poll` answers that without blocking, so a CLI
+       /// run from a script with an idle stdin never hangs.
+    static func stdinHasData() -> Bool {
+        if isInteractiveStdin() { return false }
+        var fds = pollfd(fd: FileHandle.standardInput.fileDescriptor,
+                         events: Int16(POLLIN),
+                         revents: 0)
+        let ready = poll(&fds, 1, 0)
+        return ready > 0 && (fds.revents & Int16(POLLIN)) != 0
+    }
     // Findings 4 & 5: binary discovery goes through one `BinaryLocator` (not the
     // copy-pasted checks the CLI used to roll here), and we surface microphone
     // TCC status explicitly instead of letting AVAudioEngine emit an opaque error.

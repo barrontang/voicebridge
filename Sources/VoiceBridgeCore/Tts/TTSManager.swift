@@ -12,6 +12,8 @@ public struct SpeakResult: Sendable {
     public let requestedMode: TTSMode
      /// True when the requested engine was unavailable and a fallback ran.
     public let fellBack: Bool
+    /// True when a real audio file exists at `url` (false for in-place engines).
+    public let hasAudioFile: Bool
 
         /// A short, UI-friendly status line (empty on the happy path).
     public var statusLine: String {
@@ -39,16 +41,24 @@ public struct TTSManager {
     private let cacheLimits: CacheGuardian.Limits
     private let pruneAfterWrite: Bool
 
+        /// Builds the engine for a mode. Injectable so the orchestration
+        /// (selection, fallback, play/no-play contract) is unit-testable
+        /// without a real Piper/Kokoro/edge-tts installation.
+    public typealias EngineFactory =
+        @MainActor (TTSMode, String?, VoiceBridgeEnvironment) -> any TTSBackend
+    private let engineFactory: EngineFactory
 
     /// The `cacheLimits` / `pruneAfterWrite` args default to a sensible "keep
     /// ~1k files / 2 GiB / 30 days" policy, so existing `TTSManager(config:)`
     /// call sites keep working unchanged.
     public init(config: TTSConfigManager,
                 cacheLimits: CacheGuardian.Limits = .init(),
-                pruneAfterWrite: Bool = true) {
+                pruneAfterWrite: Bool = true,
+                engineFactory: EngineFactory? = nil) {
         self.config = config
         self.cacheLimits = cacheLimits
         self.pruneAfterWrite = pruneAfterWrite
+        self.engineFactory = engineFactory ?? TTSManager.defaultEngineFactory
             }
 
            /// Speaks `text` using `mode` (defaults to the UI selection). Falls
@@ -65,12 +75,12 @@ public struct TTSManager {
         let resolvedVoice = voice ?? config.selectedModelFile
         let env = config.environment()
 
-        var engine = makeEngine(mode, voice: resolvedVoice, env: env)
+        var engine = engineFactory(mode, resolvedVoice, env)
         var fellBack = false
 
                // Graceful degradation: chosen engine missing → built-in voice.
         if !engine.isAvailable() && fallingBack {
-             let fallback = makeEngine(.system, voice: nil, env: env)
+             let fallback = engineFactory(.system, nil, env)
             if fallback.isAvailable() {
             let note = "“\(mode.rawValue)” unavailable — falling back to \(fallback.displayName)."
                  VBLog.tts.warning("\(note)")
@@ -94,54 +104,82 @@ public struct TTSManager {
                  VBLog.tts.warning("text is sent to a remote service by edge-tts, not kept on-device;")
                  VBLog.tts.warning("switch to a local engine (Piper/Kokoro/System) for offline TTS.")
                  }
+        // In-place engines (AVSpeech) *speak while synthesizing* - there is no
+        // file to produce. Asking for synthesis without playback would still
+        // make noise, so it is skipped entirely: `play: false` means "don't
+        // speak", not "speak quietly".
+        if !engine.producesAudioFile && !play {
+            VBLog.tts.info("skipping in-place synthesis (\(engine.displayName)): playback not requested")
+            return SpeakResult(url: env.cacheDir.appendingPathComponent("(in-place)"),
+                               engineName: engine.displayName,
+                               requestedMode: mode,
+                               fellBack: fellBack,
+                               hasAudioFile: false)
+        }
+
+        // The cache dir may not exist yet (fresh install, user wiped it).
+        // Every file-producing engine writes straight into it, so create it
+        // first - otherwise the very first synthesis fails on a missing dir.
+        try? FileManager.default.createDirectory(
+            at: env.cacheDir, withIntermediateDirectories: true)
+
         let out = env.cacheDir
-                     .appendingPathComponent(UUID().uuidString + ".wav")
+                     .appendingPathComponent(UUID().uuidString + "." + engine.preferredFileExtension)
         let url = try await engine.synthesize(text: text, voice: resolvedVoice, outputPath: out)
         VBLog.tts.info("wrote \(url.lastPathComponent) via \(engine.displayName)")
         if fellBack { VBLog.tts.notice("fell back to \(engine.displayName)") }
 
-                // P1: reap the cache dir so it can't grow unbounded. File-producing
-               // engines wrote to `out` just now; a prune of a fresh/empty dir is a
-               // harmless no-op, and the just-written file is the newest so it survives.
+                // P1: reap the cache dir so it can't grow unbounded. The prune
+               // walks the whole directory, so it runs OFF the main actor
+               // (a big cache would otherwise stall the UI). The just-written
+               // file is the newest, so it survives the pass.
         if pruneAfterWrite, engine.producesAudioFile {
-             let outcome = CacheGuardian().prune(directory: env.cacheDir, limits: cacheLimits)
-            if !outcome.isEmpty {
-                VBLog.tts.info("cache prune: removed \(outcome.removedCount) file(s), \(outcome.removedBytes) B")
-                  }
+            let dir = env.cacheDir
+            let limits = cacheLimits
+            Task.detached(priority: .utility) {
+                let outcome = CacheGuardian().prune(directory: dir, limits: limits)
+                if !outcome.isEmpty {
+                    VBLog.tts.info("cache prune: removed \(outcome.removedCount) file(s), \(outcome.removedBytes) B")
                 }
+            }
+                }
+
+        let hasFile = engine.producesAudioFile
+                     && FileManager.default.fileExists(atPath: url.path)
 
         guard play else {
             return SpeakResult(url: url, engineName: engine.displayName,
-                               requestedMode: mode, fellBack: fellBack)
+                               requestedMode: mode, fellBack: fellBack,
+                               hasAudioFile: hasFile)
              }
 
         if engine.producesAudioFile {
-            if FileManager.default.fileExists(atPath: url.path) {
-                try Playback.playWAV(url)
+            if hasFile {
+                try Playback.playAudio(url)
                    } else {
                 VBLog.tts.warning("no audio file at \(url.path)")
                    }
               } else {
-              // In-place (AVSpeech): keep the main run loop busy so the utterance
-              // actually plays before a CLI process would otherwise exit.
-            Playback.spinMainRunLoop(for: TTSManager.estimatedSeconds(text))
+              // In-place (AVSpeech): `synthesize` already spoke the utterance
+              // and resolved only when it finished, so there is nothing left
+              // to do here (no run-loop spin, no estimated duration).
             VBLog.tts.info("spoken in-place via \(engine.displayName)")
               }
         return SpeakResult(url: url, engineName: engine.displayName,
-                           requestedMode: mode, fellBack: fellBack)
+                           requestedMode: mode, fellBack: fellBack,
+                           hasAudioFile: hasFile)
         }
 
-           // Rough speaking-time estimate (~2.5 words/sec) to size the runloop spin.
-    private static func estimatedSeconds(_ text: String) -> Double {
+           // Rough speaking-time estimate (~2.5 words/sec), kept for callers that
+    /// want to size their own timeout around an in-place utterance.
+    public static func estimatedSeconds(_ text: String) -> Double {
         let words = text.split { $0 == " " || $0 == "\n" }.count
         return max(1.5, Double(words) / 2.5 + 0.75)
          }
 
-           // Build the engine for a mode *here* (on the main actor) so it can read
-           // `@MainActor` config without a stored closure crossing isolation. Paths
-          // come from `env` (the configured root), never a static.
-    private func makeEngine(_ mode: TTSMode, voice: String?, env: VoiceBridgeEnvironment)
-        -> TTSBackend {
+           // The production engine factory. Paths come from `env` (the
+           // configured root), never a static.
+    public static let defaultEngineFactory: EngineFactory = { mode, voice, env in
         switch mode {
         case .system:
             return SystemVoiceBackend()
@@ -152,10 +190,10 @@ public struct TTSManager {
              let dir = (voice?.contains("/") == true)
                         ? URL(fileURLWithPath: voice ?? "")
                         : env.paths.piperVoiceDir
-            let raw = ProcessInfo.processInfo.environment["VOICEBRIDGE_PIPER"]
-            return PiperBackend(modelDirectory: dir,
-                              binaryLocator: env.binaryLocator,
-                             binaryOverride: raw)
+             let raw = ProcessInfo.processInfo.environment["VOICEBRIDGE_PIPER"]
+             return PiperBackend(modelDirectory: dir,
+                               binaryLocator: env.binaryLocator,
+                              binaryOverride: raw)
         case .kokoro:
               // Pass the voice as a Kokoro *voice name* (e.g. af_bella); a path we
               // received is ignored by KokoroBackend, which uses af_bella by default

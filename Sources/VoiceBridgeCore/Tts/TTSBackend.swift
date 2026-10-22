@@ -27,6 +27,18 @@ public protocol TTSBackend: Sendable {
         /// Offline engines return `false`; the orchestrator uses this to warn
         /// the user that their words are leaving the machine before speaking.
     var requiresNetwork: Bool { get }
+
+        /// The file extension the engine's audio is written with.
+        ///
+        /// Most engines emit WAV (`"wav"`); edge-tts emits MP3. The
+        /// orchestrator names the cache slot after this, so a `.wav` file never
+        /// ends up holding MP3 bytes (which would break every tool that trusts
+        /// the extension).
+        ///
+        /// This is a *requirement* (not just an extension member) so it is
+        /// dispatched dynamically through the existential: an engine that
+        /// overrides it must actually be honoured.
+    var preferredFileExtension: String { get }
 }
 
 public extension TTSBackend {
@@ -36,4 +48,7 @@ public extension TTSBackend {
 
         /// Network-bound engines (edge-tts) override this to `true`.
     var requiresNetwork: Bool { false }
+
+        /// WAV is the default audio container.
+    var preferredFileExtension: String { "wav" }
 }
