@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #endif
 
 /// A fast reachability check for a *local* HTTP service.
@@ -22,9 +22,11 @@ public final class ServerProbe: @unchecked Sendable {
 
     public init() {}
 
-    public func isReachable(_ url: URL,
-                            timeout: TimeInterval = 0.25,
-                            cacheFor: TimeInterval = 3) -> Bool {
+    public func isReachable(
+        _ url: URL,
+        timeout: TimeInterval = 0.25,
+        cacheFor: TimeInterval = 3
+    ) -> Bool {
         guard let host = url.host else { return false }
         guard Self.isLoopback(host) else { return true }
         let port = url.port ?? (url.scheme == "https" ? 443 : 80)
@@ -62,21 +64,24 @@ public final class ServerProbe: @unchecked Sendable {
 
         var list: UnsafeMutablePointer<addrinfo>?
         guard getaddrinfo(host, String(port), &hints, &list) == 0,
-              let first = list else { return false }
+            let first = list
+        else { return false }
         defer { freeaddrinfo(first) }
 
         var cursor: UnsafeMutablePointer<addrinfo>? = first
         while let address = cursor {
-            let fd = socket(address.pointee.ai_family,
-                            address.pointee.ai_socktype,
-                            address.pointee.ai_protocol)
+            let fd = socket(
+                address.pointee.ai_family,
+                address.pointee.ai_socktype,
+                address.pointee.ai_protocol)
             if fd >= 0 {
                 let flags = fcntl(fd, F_GETFL, 0)
                 _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
 
-                let result = Darwin.connect(fd,
-                                            address.pointee.ai_addr,
-                                            address.pointee.ai_addrlen)
+                let result = Darwin.connect(
+                    fd,
+                    address.pointee.ai_addr,
+                    address.pointee.ai_addrlen)
                 if result == 0 {
                     close(fd)
                     return true
@@ -88,7 +93,8 @@ public final class ServerProbe: @unchecked Sendable {
                         var error: Int32 = 0
                         var length = socklen_t(MemoryLayout<Int32>.size)
                         if getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0,
-                           error == 0 {
+                            error == 0
+                        {
                             close(fd)
                             return true
                         }

@@ -28,10 +28,12 @@ public enum AudioResampler {
     ///   - to: the destination sample rate.
     ///   - antiAlias: apply the pre-decimation low-pass (on by default; it is
     ///     a no-op when upsampling).
-    public static func resample(_ input: [Float],
-                                 from: Double,
-                                 to: Double,
-                                 antiAlias: Bool = true) -> [Float] {
+    public static func resample(
+        _ input: [Float],
+        from: Double,
+        to: Double,
+        antiAlias: Bool = true
+    ) -> [Float] {
         guard !input.isEmpty, from > 0, to > 0 else { return [] }
         if abs(from - to) < 1.0 { return input }
 
@@ -42,7 +44,7 @@ public enum AudioResampler {
     /// Linear interpolation between two samples.
     static func interpolate(_ samples: [Float], from: Double, to: Double) -> [Float] {
         guard !samples.isEmpty else { return [] }
-        let ratio = to / from                            // target / source
+        let ratio = to / from  // target / source
         let outCount = max(1, Int((Double(samples.count - 1) * ratio).rounded()) + 1)
         var out = [Float](repeating: 0, count: outCount)
 
@@ -52,7 +54,7 @@ public enum AudioResampler {
             let hi = min(lo + 1, samples.count - 1)
             let t = Float(max(0, min(1, srcPos - Double(lo))))
             out[i] = samples[lo] + (samples[hi] - samples[lo]) * t
-           }
+        }
         return out
     }
 
@@ -71,7 +73,7 @@ public enum AudioResampler {
             last1 = (1 - alpha) * x + alpha * last1
             last2 = (1 - alpha) * last1 + alpha * last2
             out[i] = last2
-           }
+        }
         return out
     }
 }

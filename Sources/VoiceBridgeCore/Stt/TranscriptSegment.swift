@@ -2,8 +2,8 @@ import Foundation
 
 public struct TranscriptSegment: Sendable, Identifiable, Equatable {
     public enum Stability: Sendable, Equatable {
-        case volatile    // may be revised; render muted
-        case stable      // immutable once emitted
+        case volatile  // may be revised; render muted
+        case stable  // immutable once emitted
     }
 
     public let id: UUID
@@ -37,8 +37,8 @@ public struct TranscriptSegment: Sendable, Identifiable, Equatable {
 }
 
 public enum TranscriptEvent: Sendable {
-    case partial(TranscriptSegment)    // replace segment with same id
-    case final(TranscriptSegment)      // promote; never changes again
-    case gap(Range<TimeInterval>)      // audio dropped (backpressure / reset)
+    case partial(TranscriptSegment)  // replace segment with same id
+    case final(TranscriptSegment)  // promote; never changes again
+    case gap(Range<TimeInterval>)  // audio dropped (backpressure / reset)
     case finished
 }

@@ -24,31 +24,36 @@ public enum Shell {
 
     /// Runs a binary, draining both pipes concurrently so large output never
     /// deadlocks the process, and throws on non-zero exit or timeout.
-    public static func run(at binary: String,
-                          arguments: [String],
-                          workingDirectory: String? = nil,
-                          timeout: TimeInterval? = nil) async throws -> Result {
+    public static func run(
+        at binary: String,
+        arguments: [String],
+        workingDirectory: String? = nil,
+        timeout: TimeInterval? = nil
+    ) async throws -> Result {
         guard !isBlank(binary) else {
             throw VoiceError.binaryNotFound(component: "(empty)", hint: "No binary was provided.")
-         }
+        }
 
-        let outcome = try await ProcessRunner.run(ProcessInvocation(
-            executable: binary,
-            arguments: arguments,
-            workingDirectory: workingDirectory,
-            timeout: timeout))
+        let outcome = try await ProcessRunner.run(
+            ProcessInvocation(
+                executable: binary,
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                timeout: timeout))
 
         if outcome.timedOut {
-            throw VoiceError.processTimeout(component: binary,
-                                            seconds: timeout ?? -1)
-            }
+            throw VoiceError.processTimeout(
+                component: binary,
+                seconds: timeout ?? -1)
+        }
         if outcome.status != 0 {
-            throw VoiceError.processFailed(component: binary,
-                                           status: outcome.status,
-                                           stderr: outcome.stderr)
-            }
+            throw VoiceError.processFailed(
+                component: binary,
+                status: outcome.status,
+                stderr: outcome.stderr)
+        }
         return Result(stdout: outcome.stdout, stderr: outcome.stderr, status: outcome.status)
-     }
+    }
 
     /// Resolve a bare command name to an absolute executable path on `$PATH`.
     ///
@@ -60,7 +65,7 @@ public enum Shell {
     /// before handing off to `Pipeline`.
     public static func resolve(_ input: String) -> String {
         if FileManager.default.isExecutableFile(atPath: input) { return input }
-         // Not a directly-executable path: search $PATH by the command's
+        // Not a directly-executable path: search $PATH by the command's
         // basename. Falls back to the original input if genuinely absent.
         if let abs = pathLookup((input as NSString).lastPathComponent) { return abs }
         return input
@@ -73,8 +78,8 @@ public enum Shell {
             let candidate = ((dir as NSString).appendingPathComponent(name))
             if FileManager.default.isExecutableFile(atPath: candidate) {
                 return candidate
-             }
-         }
+            }
+        }
         return nil
     }
 

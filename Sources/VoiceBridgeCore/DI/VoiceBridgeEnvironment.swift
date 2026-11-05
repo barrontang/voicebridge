@@ -24,28 +24,31 @@ import Foundation
 /// fields they care about directly.)
 public struct VoiceBridgeEnvironment: Sendable {
 
-       /// On-disk model layout rooted at the user's chosen root.
+    /// On-disk model layout rooted at the user's chosen root.
     public var paths: ModelPaths
 
-       /// The single, shared binary-discovery implementation.
+    /// The single, shared binary-discovery implementation.
     public var binaryLocator: BinaryLocator
 
-    public init(paths: ModelPaths,
-                  binaryLocator: BinaryLocator = BinaryLocator()) {
+    public init(
+        paths: ModelPaths,
+        binaryLocator: BinaryLocator = BinaryLocator()
+    ) {
         self.paths = paths
         self.binaryLocator = binaryLocator
-      }
+    }
 
-       /// The conventional production environment: read the default root from the
-       /// host and resolve binaries against the real `$PATH`. `nonisolated` so any
-       /// backend can synthesize one off the main actor.
+    /// The conventional production environment: read the default root from the
+    /// host and resolve binaries against the real `$PATH`. `nonisolated` so any
+    /// backend can synthesize one off the main actor.
     public static func production(
-         _ env: [String: String] = ProcessInfo.processInfo.environment) -> VoiceBridgeEnvironment {
+        _ env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> VoiceBridgeEnvironment {
         VoiceBridgeEnvironment(
             paths: ModelPaths.fromEnvironment(env),
             binaryLocator: BinaryLocator(environment: env))
-        }
+    }
 
-       /// Scratch output dir for this environment's generated audio.
+    /// Scratch output dir for this environment's generated audio.
     public var cacheDir: URL { paths.cacheDir }
 }

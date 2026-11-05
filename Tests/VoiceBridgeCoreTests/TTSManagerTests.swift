@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the TTS orchestration contract in `TTSManager`:
@@ -26,11 +27,13 @@ final class TTSManagerTests: XCTestCase {
         nonisolated(unsafe) var lastText: String?
         nonisolated(unsafe) var lastOutputPath: URL?
 
-        init(name: String,
-             available: Bool = true,
-             producesFile: Bool = true,
-             fileExtension: String = "wav",
-             requiresNetwork: Bool = false) {
+        init(
+            name: String,
+            available: Bool = true,
+            producesFile: Bool = true,
+            fileExtension: String = "wav",
+            requiresNetwork: Bool = false
+        ) {
             self.name = name
             self.available = available
             self.producesFile = producesFile

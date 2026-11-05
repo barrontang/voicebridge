@@ -12,17 +12,19 @@ public struct ProcessInvocation: Sendable {
     /// Seconds before the child is terminated (nil = wait forever).
     public var timeout: TimeInterval?
 
-    public init(executable: String,
-                arguments: [String] = [],
-                workingDirectory: String? = nil,
-                standardInput: Data? = nil,
-                timeout: TimeInterval? = nil) {
+    public init(
+        executable: String,
+        arguments: [String] = [],
+        workingDirectory: String? = nil,
+        standardInput: Data? = nil,
+        timeout: TimeInterval? = nil
+    ) {
         self.executable = executable
         self.arguments = arguments
         self.workingDirectory = workingDirectory
         self.standardInput = standardInput
         self.timeout = timeout
-        }
+    }
 }
 
 /// The result of a finished child process.
@@ -38,7 +40,7 @@ public struct ProcessOutcome: Sendable {
         self.stderr = stderr
         self.status = status
         self.timedOut = timedOut
-        }
+    }
 }
 
 /// A robust `Process` runner.
@@ -72,12 +74,12 @@ public enum ProcessRunner {
         process.arguments = invocation.arguments
         if let dir = invocation.workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: dir)
-            }
+        }
         process.standardOutput = outPipe
         process.standardError = errPipe
         if invocation.standardInput != nil {
             process.standardInput = inPipe
-            }
+        }
 
         let exit = ExitSignal()
         process.terminationHandler = { p in exit.signal(p.terminationStatus) }
@@ -88,7 +90,7 @@ public enum ProcessRunner {
 
         do {
             try process.run()
-            } catch {
+        } catch {
             // The child never started. Close the write ends so the readers
             // hit EOF instead of blocking forever.
             outPipe.fileHandleForWriting.closeFile()
@@ -99,16 +101,16 @@ public enum ProcessRunner {
             throw VoiceError.binaryNotFound(
                 component: invocation.executable,
                 hint: "run() failed: \(error)")
-            }
+        }
 
         // Feed stdin off the calling thread and close it (the child must see
         // EOF - Piper and Kokoro both wait for it).
         let stdinWrite = Task.detached(priority: .userInitiated) {
             if let data = invocation.standardInput {
                 try? inPipe.fileHandleForWriting.write(contentsOf: data)
-                }
-            try? inPipe.fileHandleForWriting.close()
             }
+            try? inPipe.fileHandleForWriting.close()
+        }
 
         // Cancellation terminates the child (no orphaned 30-minute
         // transcription after the user hits Stop).
@@ -116,18 +118,19 @@ public enum ProcessRunner {
         var timedOut = false
         do {
             status = try await withTaskCancellationHandler {
-                try await waitForExit(exit,
-                                      timeout: invocation.timeout,
-                                      component: invocation.executable,
-                                      // The child has to die *before* the
-                                      // timeout error propagates: the exit
-                                      // waiter only finishes when the
-                                      // termination handler fires.
-                                      onTimeout: { process.terminate() })
-                } onCancel: {
+                try await waitForExit(
+                    exit,
+                    timeout: invocation.timeout,
+                    component: invocation.executable,
+                    // The child has to die *before* the
+                    // timeout error propagates: the exit
+                    // waiter only finishes when the
+                    // termination handler fires.
+                    onTimeout: { process.terminate() })
+            } onCancel: {
                 process.terminate()
-                }
-            } catch {
+            }
+        } catch {
             timedOut = true
             process.terminate()
             _ = await exit.wait()
@@ -138,7 +141,7 @@ public enum ProcessRunner {
             // EOF would hang the caller. The drain tasks finish on their
             // own when the pipe finally closes.
             throw error
-            }
+        }
 
         await stdinWrite.value
         let out = await outTask.value
@@ -153,10 +156,12 @@ public enum ProcessRunner {
     /// for *every* child before it returns, and the child that waits for the
     /// exit can only finish when the process dies - so the timeout has to
     /// kill the child first, which is exactly what the timer does.
-    private static func waitForExit(_ exit: ExitSignal,
-                                    timeout: TimeInterval?,
-                                    component: String,
-                                    onTimeout: @escaping () -> Void) async throws -> Int32 {
+    private static func waitForExit(
+        _ exit: ExitSignal,
+        timeout: TimeInterval?,
+        component: String,
+        onTimeout: @escaping () -> Void
+    ) async throws -> Int32 {
         guard let timeout else { return await exit.wait() }
 
         let flag = TimeoutFlag()
@@ -165,14 +170,14 @@ public enum ProcessRunner {
         timer.setEventHandler {
             flag.fire()
             onTimeout()
-            }
+        }
         timer.resume()
         defer { timer.cancel() }
 
         let status = await exit.wait()
         if flag.fired {
             throw VoiceError.processTimeout(component: component, seconds: timeout)
-            }
+        }
         return status
     }
 
@@ -188,7 +193,11 @@ final class TimeoutFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var didFire = false
 
-    var fired: Bool { lock.lock(); defer { lock.unlock() }; return didFire }
+    var fired: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didFire
+    }
 
     func fire() {
         lock.lock()
@@ -217,10 +226,10 @@ final class ExitSignal: @unchecked Sendable {
                 lock.unlock()
                 cont.resume(returning: status)
                 return
-                }
+            }
             continuations.append(cont)
             lock.unlock()
-            }
+        }
     }
 
     /// Called from the termination handler.

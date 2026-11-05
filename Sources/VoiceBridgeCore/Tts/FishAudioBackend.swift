@@ -61,13 +61,15 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
     /// A cheap "is the local server up?" check, cached for a few seconds.
     private let probe = ServerProbe()
 
-    public init(baseURL: URL,
-                modelID: String? = nil,
-                referencePath: String? = nil,
-                referenceText: String? = nil,
-                apiKey: String? = nil,
-                timeout: TimeInterval = 300,
-                isConfigured: Bool = true) {
+    public init(
+        baseURL: URL,
+        modelID: String? = nil,
+        referencePath: String? = nil,
+        referenceText: String? = nil,
+        apiKey: String? = nil,
+        timeout: TimeInterval = 300,
+        isConfigured: Bool = true
+    ) {
         self.baseURL = baseURL
         self.modelID = modelID
         self.referencePath = referencePath
@@ -80,9 +82,10 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
     /// The engine when no server is configured: it reports itself as
     /// unavailable, so the manager falls back to the built-in voice.
     public static func unconfigured() -> FishAudioBackend {
-        FishAudioBackend(baseURL: URL(string: defaultLocalURL)
-                            ?? URL(fileURLWithPath: "/"),
-                          isConfigured: false)
+        FishAudioBackend(
+            baseURL: URL(string: defaultLocalURL)
+                ?? URL(fileURLWithPath: "/"),
+            isConfigured: false)
     }
 
     /// The checkpoint directory the installer writes, under the model root.
@@ -106,16 +109,18 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
         let dir = localModelDirectory(root: root)
         let manager = FileManager.default
         guard manager.fileExists(atPath: dir.appendingPathComponent("config.json").path),
-              manager.fileExists(atPath: dir.appendingPathComponent("codec.safetensors").path)
+            manager.fileExists(atPath: dir.appendingPathComponent("codec.safetensors").path)
         else { return false }
 
-        let files = (try? manager.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        let files =
+            (try? manager.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.fileSizeKey])) ?? []
         var total: Int64 = 0
         for file in files
         where file.lastPathComponent.hasPrefix("model-")
-            && file.pathExtension == "safetensors" {
+            && file.pathExtension == "safetensors"
+        {
             let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             total += Int64(size)
         }
@@ -141,15 +146,17 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
             // but the checkpoint stayed in the default folder.
             let localPath: String? = {
                 guard let modelRoot,
-                      ServerProbe.isLoopback(url.host ?? ""),
-                      localModelExists(root: modelRoot) else { return nil }
+                    ServerProbe.isLoopback(url.host ?? ""),
+                    localModelExists(root: modelRoot)
+                else { return nil }
                 return localModelDirectory(root: modelRoot).path
             }()
-            return FishAudioBackend(baseURL: url,
-                                    modelID: modelID ?? localPath,
-                                    referencePath: env["VOICEBRIDGE_FISH_REFERENCE"],
-                                    referenceText: env["VOICEBRIDGE_FISH_REFERENCE_TEXT"],
-                                    apiKey: env["VOICEBRIDGE_FISH_API_KEY"])
+            return FishAudioBackend(
+                baseURL: url,
+                modelID: modelID ?? localPath,
+                referencePath: env["VOICEBRIDGE_FISH_REFERENCE"],
+                referenceText: env["VOICEBRIDGE_FISH_REFERENCE_TEXT"],
+                apiKey: env["VOICEBRIDGE_FISH_API_KEY"])
         }
 
         if let modelRoot, localModelExists(root: modelRoot) {
@@ -200,7 +207,8 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
         // The voice slot carries the reference clip when one is configured
         // (the Settings picker has no file list for a served model). A local
         // path only works with a local server; a URL works with any server.
-        let reference = referencePath
+        let reference =
+            referencePath
             ?? voice.flatMap { $0.contains("/") ? $0 : nil }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/audio/speech"))
@@ -211,10 +219,11 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = timeout
-        request.httpBody = try Self.requestBody(text: text,
-                                                modelID: modelID,
-                                                referencePath: reference,
-                                                referenceText: referenceText)
+        request.httpBody = try Self.requestBody(
+            text: text,
+            modelID: modelID,
+            referencePath: reference,
+            referenceText: referenceText)
 
         let data: Data
         let response: URLResponse
@@ -258,7 +267,7 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
         let local = ServerProbe.isLoopback(host)
         switch error.code {
         case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost,
-             .notConnectedToInternet, .timedOut:
+            .notConnectedToInternet, .timedOut:
             if local {
                 return "nothing is listening on \(host):\(port) — start the local "
                     + "Drama 3 server with scripts/start-drama3-mlx.sh"
@@ -275,19 +284,19 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
         let bytes = [UInt8](data.prefix(4))
         if bytes.count >= 4 {
             if bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46 {
-                return true // RIFF (WAV)
+                return true  // RIFF (WAV)
             }
             if bytes[0] == 0x66, bytes[1] == 0x4C, bytes[2] == 0x61, bytes[3] == 0x43 {
-                return true // fLaC
+                return true  // fLaC
             }
             if bytes[0] == 0x4F, bytes[1] == 0x67, bytes[2] == 0x67, bytes[3] == 0x53 {
-                return true // OggS
+                return true  // OggS
             }
             if bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 {
-                return true // MP3 (ID3)
+                return true  // MP3 (ID3)
             }
             if bytes[0] == 0xFF, bytes[1] & 0xE0 == 0xE0 {
-                return true // MP3 frame
+                return true  // MP3 frame
             }
         }
         return false
@@ -298,10 +307,12 @@ public final class FishAudioBackend: TTSBackend, @unchecked Sendable {
     /// `input` is the OpenAI-compatible field; `text` is what the Drama 3
     /// examples use. `ref_audio`/`ref_text` are the `mlx-audio` spelling and
     /// `references` is SGLang's: each server ignores the other's key.
-    static func requestBody(text: String,
-                            modelID: String? = nil,
-                            referencePath: String?,
-                            referenceText: String?) throws -> Data {
+    static func requestBody(
+        text: String,
+        modelID: String? = nil,
+        referencePath: String?,
+        referenceText: String?
+    ) throws -> Data {
         var payload: [String: Any] = [
             "input": text,
             "text": text,

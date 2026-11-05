@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the live-capture foundation: the resampler, the sample ring the
@@ -9,7 +10,7 @@ final class AudioRouterTests: XCTestCase {
     // MARK: - Resampler
 
     func testResampleProducesTheExpectedLength() {
-        let input = [Float](repeating: 0.5, count: 48_000)   // 1 s at 48 kHz
+        let input = [Float](repeating: 0.5, count: 48_000)  // 1 s at 48 kHz
         let out = AudioResampler.resample(input, from: 48_000, to: 16_000)
         XCTAssertEqual(out.count, 16_000, accuracy: 2)
     }
@@ -34,11 +35,12 @@ final class AudioRouterTests: XCTestCase {
             }
         }
         let low = AudioResampler.lowPass(tone(freq: 2_000, count: 4_800), cutoff: 7_200, rate: rate)
-        let high = AudioResampler.lowPass(tone(freq: 20_000, count: 4_800), cutoff: 7_200, rate: rate)
+        let high = AudioResampler.lowPass(
+            tone(freq: 20_000, count: 4_800), cutoff: 7_200, rate: rate)
 
         func peak(_ s: [Float]) -> Float { s.map { abs($0) }.max() ?? 0 }
-        XCTAssertGreaterThan(peak(low), 0.5)              // 2 kHz passes
-        XCTAssertLessThan(peak(high), peak(low) * 0.35)   // 20 kHz is filtered out
+        XCTAssertGreaterThan(peak(low), 0.5)  // 2 kHz passes
+        XCTAssertLessThan(peak(high), peak(low) * 0.35)  // 20 kHz is filtered out
     }
 
     // MARK: - Sample ring
@@ -75,17 +77,17 @@ final class AudioRouterTests: XCTestCase {
 
     func testParserReadsWhisperOffsets() throws {
         let json = """
-        {
-          "language": "en",
-          "duration_ms": 4000,
-          "result": [
-            { "transcription": " hello world",
-              "offsets": { "from": 0, "to": 1200 } },
-            { "transcription": " how are you",
-              "offsets": { "from": 1200, "to": 3000 } }
-          ]
-        }
-        """
+            {
+              "language": "en",
+              "duration_ms": 4000,
+              "result": [
+                { "transcription": " hello world",
+                  "offsets": { "from": 0, "to": 1200 } },
+                { "transcription": " how are you",
+                  "offsets": { "from": 1200, "to": 3000 } }
+              ]
+            }
+            """
         let meta = try XCTUnwrap(
             WhisperTranscriptParser.parseJSON(Data(json.utf8)))
         XCTAssertEqual(meta.segments.count, 2)
@@ -98,8 +100,8 @@ final class AudioRouterTests: XCTestCase {
 
     func testParserReadsClockTimestamps() throws {
         let json = """
-        { "transcription": [ { "text": "hi", "timestamps": { "from": "00:00:01,000", "to": "00:00:02,500" } } ] }
-        """
+            { "transcription": [ { "text": "hi", "timestamps": { "from": "00:00:01,000", "to": "00:00:02,500" } } ] }
+            """
         let meta = try XCTUnwrap(
             WhisperTranscriptParser.parseJSON(Data(json.utf8)))
         XCTAssertEqual(meta.segments.count, 1)
@@ -109,8 +111,8 @@ final class AudioRouterTests: XCTestCase {
 
     func testParserSkipsSegmentsWithoutUsableTimings() throws {
         let json = """
-        { "result": [ { "transcription": "no timing here" } ] }
-        """
+            { "result": [ { "transcription": "no timing here" } ] }
+            """
         let meta = try XCTUnwrap(
             WhisperTranscriptParser.parseJSON(Data(json.utf8)))
         XCTAssertTrue(meta.segments.isEmpty)
@@ -126,10 +128,12 @@ final class AudioRouterTests: XCTestCase {
 private struct FakeFileBackend: WhisperBackend {
     let result: Transcription
 
-    func transcribe(audio: URL,
-                    language: String?,
-                    model: SttModel,
-                    useTimestamps: Bool) async throws -> Transcription {
+    func transcribe(
+        audio: URL,
+        language: String?,
+        model: SttModel,
+        useTimestamps: Bool
+    ) async throws -> Transcription {
         result
     }
 }
@@ -137,16 +141,17 @@ private struct FakeFileBackend: WhisperBackend {
 final class WindowedAdapterTests: XCTestCase {
 
     func testAdapterMapsTimedSegmentsIntoAbsoluteTime() async throws {
-        let backend = FakeFileBackend(result: Transcription(
-            text: "hello world how are you",
-            language: "en",
-            model: .tiny,
-            durationSeconds: 3.0,
-            realtimeFactor: 0.2,
-            segments: [
-                .init(text: "hello world", start: 0, end: 1.2),
-                .init(text: "how are you", start: 1.2, end: 3.0),
-            ]))
+        let backend = FakeFileBackend(
+            result: Transcription(
+                text: "hello world how are you",
+                language: "en",
+                model: .tiny,
+                durationSeconds: 3.0,
+                realtimeFactor: 0.2,
+                segments: [
+                    .init(text: "hello world", start: 0, end: 1.2),
+                    .init(text: "how are you", start: 1.2, end: 3.0),
+                ]))
 
         let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("vb-adapter-\(UUID().uuidString)")
@@ -169,12 +174,13 @@ final class WindowedAdapterTests: XCTestCase {
     }
 
     func testAdapterFallsBackToOneSegmentWithoutTimings() async throws {
-        let backend = FakeFileBackend(result: Transcription(
-            text: "hello world",
-            language: "en",
-            model: .tiny,
-            durationSeconds: 2.0,
-            realtimeFactor: 0.2))
+        let backend = FakeFileBackend(
+            result: Transcription(
+                text: "hello world",
+                language: "en",
+                model: .tiny,
+                durationSeconds: 2.0,
+                realtimeFactor: 0.2))
 
         let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("vb-adapter-\(UUID().uuidString)")

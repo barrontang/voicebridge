@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 // MARK: - TranscriptReconciler
@@ -13,8 +14,9 @@ final class TranscriptReconcilerTests: XCTestCase {
             TranscriptSegment(text: "hello world", range: 0.0..<1.5, stability: .volatile),
             TranscriptSegment(text: "how are you", range: 1.5..<3.0, stability: .volatile),
         ]
-        let firstEvents = r.ingest(segments: w0, windowRange: 0..<4, windowIndex: 0,
-                                   utteranceID: nil, isFinal: true)
+        let firstEvents = r.ingest(
+            segments: w0, windowRange: 0..<4, windowIndex: 0,
+            utteranceID: nil, isFinal: true)
         let firstFinals = firstEvents.compactMap {
             if case .final(let s) = $0 { return s.text } else { return nil }
         }
@@ -27,8 +29,9 @@ final class TranscriptReconcilerTests: XCTestCase {
             TranscriptSegment(text: "how are you", range: 1.4..<2.9, stability: .volatile),
             TranscriptSegment(text: "fine thanks", range: 3.5..<5.0, stability: .volatile),
         ]
-        let events = r.ingest(segments: w1, windowRange: 3.2..<7.2, windowIndex: 1,
-                              utteranceID: nil, isFinal: true)
+        let events = r.ingest(
+            segments: w1, windowRange: 3.2..<7.2, windowIndex: 1,
+            utteranceID: nil, isFinal: true)
 
         let finals = events.compactMap {
             if case .final(let s) = $0 { return s.text } else { return nil }
@@ -47,7 +50,9 @@ final class TranscriptReconcilerTests: XCTestCase {
         let before = r.snapshot
 
         _ = r.ingest(
-            segments: [TranscriptSegment(text: "a rewritten", range: 0.0..<1.0, stability: .volatile)],
+            segments: [
+                TranscriptSegment(text: "a rewritten", range: 0.0..<1.0, stability: .volatile)
+            ],
             windowRange: 3.0..<7.0, windowIndex: 1, utteranceID: nil, isFinal: true
         )
         XCTAssertEqual(r.snapshot.first?.text, before.first?.text)
@@ -58,8 +63,9 @@ final class TranscriptReconcilerTests: XCTestCase {
         let seg = TranscriptSegment(text: "hello", range: 0.0..<0.5, stability: .volatile)
 
         // A partial is never committed: it may still be revised.
-        let partialEvents = r.ingest(segments: [seg], windowRange: 0..<0.6, windowIndex: 0,
-                                     utteranceID: UUID(), isFinal: false)
+        let partialEvents = r.ingest(
+            segments: [seg], windowRange: 0..<0.6, windowIndex: 0,
+            utteranceID: UUID(), isFinal: false)
         let partials = partialEvents.compactMap {
             if case .partial(let s) = $0 { return s } else { return nil }
         }
@@ -68,8 +74,9 @@ final class TranscriptReconcilerTests: XCTestCase {
         XCTAssertEqual(r.snapshot.filter { $0.stability == .stable }.count, 0)
 
         // The same text, delivered as a final, is committed.
-        let finalEvents = r.ingest(segments: [seg], windowRange: 0..<0.6, windowIndex: 1,
-                                    utteranceID: partials.first?.utteranceID, isFinal: true)
+        let finalEvents = r.ingest(
+            segments: [seg], windowRange: 0..<0.6, windowIndex: 1,
+            utteranceID: partials.first?.utteranceID, isFinal: true)
         let finals = finalEvents.compactMap {
             if case .final(let s) = $0 { return s } else { return nil }
         }
@@ -80,9 +87,10 @@ final class TranscriptReconcilerTests: XCTestCase {
 
     func testResetClearsEverything() {
         var r = TranscriptReconciler()
-        _ = r.ingest(segments: [
-            TranscriptSegment(text: "x", range: 0..<1, stability: .volatile)
-        ], windowRange: 0..<4, windowIndex: 0, utteranceID: nil, isFinal: true)
+        _ = r.ingest(
+            segments: [
+                TranscriptSegment(text: "x", range: 0..<1, stability: .volatile)
+            ], windowRange: 0..<4, windowIndex: 0, utteranceID: nil, isFinal: true)
         XCTAssertFalse(r.snapshot.isEmpty)
         r.reset()
         XCTAssertTrue(r.snapshot.isEmpty)
@@ -91,15 +99,17 @@ final class TranscriptReconcilerTests: XCTestCase {
     func testCommittedAdvancesWatermark() {
         var r = TranscriptReconciler()
         // First window: 0..<4, "alpha" committed → watermark = 2.0.
-        _ = r.ingest(segments: [
-            TranscriptSegment(text: "alpha", range: 0.0..<2.0, stability: .volatile)
-        ], windowRange: 0..<4, windowIndex: 0, utteranceID: nil, isFinal: true)
+        _ = r.ingest(
+            segments: [
+                TranscriptSegment(text: "alpha", range: 0.0..<2.0, stability: .volatile)
+            ], windowRange: 0..<4, windowIndex: 0, utteranceID: nil, isFinal: true)
         // Second window: 3.5..<7.5. "alpha again" at 1.0..<2.0 is below the
         // watermark (2.0) → filtered; "beta" at 4.0..<5.5 is fresh → committed.
-        let events = r.ingest(segments: [
-            TranscriptSegment(text: "alpha again", range: 1.0..<2.0, stability: .volatile),
-            TranscriptSegment(text: "beta", range: 4.0..<5.5, stability: .volatile)
-        ], windowRange: 3.5..<7.5, windowIndex: 1, utteranceID: nil, isFinal: true)
+        let events = r.ingest(
+            segments: [
+                TranscriptSegment(text: "alpha again", range: 1.0..<2.0, stability: .volatile),
+                TranscriptSegment(text: "beta", range: 4.0..<5.5, stability: .volatile),
+            ], windowRange: 3.5..<7.5, windowIndex: 1, utteranceID: nil, isFinal: true)
 
         let finals = events.compactMap {
             if case .final(let s) = $0 { return s.text } else { return nil }
@@ -118,8 +128,9 @@ final class UtteranceSegmenterTests: XCTestCase {
         var boundaries: [UtteranceSegmenter.Boundary] = []
 
         // Loud frame opens an utterance.
-        let loud = AudioFrame(samples: [Float](repeating: 0.5, count: 1600),
-                              startTime: 0, sequence: 0)
+        let loud = AudioFrame(
+            samples: [Float](repeating: 0.5, count: 1600),
+            startTime: 0, sequence: 0)
         boundaries += seg.consume(loud)
         XCTAssertEqual(boundaries.count, 1)
         if case .started = boundaries[0] {} else { XCTFail("expected .started") }
@@ -127,8 +138,9 @@ final class UtteranceSegmenterTests: XCTestCase {
         XCTAssertNotNil(seg.currentUtteranceStart)
 
         // Quiet frames close it after the trailing silence elapses.
-        let quiet = AudioFrame(samples: [Float](repeating: 0.0, count: 1600),
-                               startTime: 0.1, sequence: 1)
+        let quiet = AudioFrame(
+            samples: [Float](repeating: 0.0, count: 1600),
+            startTime: 0.1, sequence: 1)
         for _ in 0..<8 { boundaries += seg.consume(quiet) }
         let ended = boundaries.compactMap { b -> Range<TimeInterval>? in
             if case .ended(let r) = b { return r } else { return nil }
@@ -139,8 +151,9 @@ final class UtteranceSegmenterTests: XCTestCase {
     func testHysteresisPreventsChatter() {
         var seg = UtteranceSegmenter()
         // A frame between the two thresholds must not open an utterance.
-        let mid = AudioFrame(samples: [Float](repeating: 0.009, count: 1600),
-                             startTime: 0, sequence: 0)
+        let mid = AudioFrame(
+            samples: [Float](repeating: 0.009, count: 1600),
+            startTime: 0, sequence: 0)
         let boundaries = seg.consume(mid)
         XCTAssertTrue(boundaries.isEmpty)
         XCTAssertNil(seg.currentUtteranceID)
@@ -148,8 +161,9 @@ final class UtteranceSegmenterTests: XCTestCase {
 
     func testFlushForceClosesOpenUtterance() {
         var seg = UtteranceSegmenter()
-        let loud = AudioFrame(samples: [Float](repeating: 0.5, count: 1600),
-                              startTime: 0, sequence: 0)
+        let loud = AudioFrame(
+            samples: [Float](repeating: 0.5, count: 1600),
+            startTime: 0, sequence: 0)
         _ = seg.consume(loud)
         let flushed = seg.flush(at: 2.0)
         guard case .ended(let range)? = flushed else {

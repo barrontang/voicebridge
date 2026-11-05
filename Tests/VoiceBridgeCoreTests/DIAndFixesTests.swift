@@ -1,5 +1,6 @@
-import XCTest
 import CryptoKit
+import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Regression + acceptance tests for the review's findings.
@@ -56,20 +57,23 @@ final class DIAndFixesTests: XCTestCase {
         // reclaimed temp region) still holds.
         if let override = ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"] {
             XCTAssertEqual(url.path, override)
-            XCTAssertFalse(url.path.hasPrefix(
-                FileManager.default.temporaryDirectory
-                         .deletingLastPathComponent().path + "/voicebridge"))
+            XCTAssertFalse(
+                url.path.hasPrefix(
+                    FileManager.default.temporaryDirectory
+                        .deletingLastPathComponent().path + "/voicebridge"))
             return
-            }
+        }
 
         let expectedPrefix = NSHomeDirectory() + "/Library/Application Support"
-        XCTAssertTrue(url.path.hasPrefix(expectedPrefix),
+        XCTAssertTrue(
+            url.path.hasPrefix(expectedPrefix),
             "config should live under Application Support, got \(url.path)")
         XCTAssertTrue(url.path.hasSuffix("VoiceBridge/config.json"))
         // Definitely not the per-user temp region the old code used.
-        XCTAssertFalse(url.path.hasPrefix(
-            FileManager.default.temporaryDirectory
-                     .deletingLastPathComponent().path + "/voicebridge"))
+        XCTAssertFalse(
+            url.path.hasPrefix(
+                FileManager.default.temporaryDirectory
+                    .deletingLastPathComponent().path + "/voicebridge"))
         XCTAssertEqual(url.lastPathComponent, "config.json")
     }
 
@@ -79,14 +83,17 @@ final class DIAndFixesTests: XCTestCase {
     func testLegacyAndCanonicalLocationsDiffer() throws {
         let canonical = try AppPaths.configURL()
         let legacy = AppPaths.legacyConfigURL()
-        XCTAssertNotEqual(canonical, legacy,
+        XCTAssertNotEqual(
+            canonical, legacy,
             "legacy and canonical config paths must not coincide")
         if ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"] == nil {
-            XCTAssertTrue(canonical.path.hasPrefix(
-                NSHomeDirectory() + "/Library/Application Support"))
-            }
-        XCTAssertTrue(legacy.path.hasPrefix(
-            FileManager.default.temporaryDirectory.path))
+            XCTAssertTrue(
+                canonical.path.hasPrefix(
+                    NSHomeDirectory() + "/Library/Application Support"))
+        }
+        XCTAssertTrue(
+            legacy.path.hasPrefix(
+                FileManager.default.temporaryDirectory.path))
     }
 
     // MARK: - Finding 4: one binary locator, in injectable order
@@ -96,8 +103,9 @@ final class DIAndFixesTests: XCTestCase {
     func testBinaryLocatorSearchOrder() {
         let fake: [String: Bool] = ["/usr/local/bin/piper": true]
         let locator = BinaryLocator(
-            searchPaths: .init(path: "/usr/local/bin:/opt/homebrew/bin",
-                               extraPrefixes: ["/opt/homebrew/opt/whisper-cpp/bin"]),
+            searchPaths: .init(
+                path: "/usr/local/bin:/opt/homebrew/bin",
+                extraPrefixes: ["/opt/homebrew/opt/whisper-cpp/bin"]),
             isExecutable: { fake[$0] ?? false })
 
         // 1. An absolute, executable path short-circuits.
@@ -113,8 +121,9 @@ final class DIAndFixesTests: XCTestCase {
     /// A missing binary falls through to the bare name (the old passthrough the
     /// shell relied on to surface the child's own error).
     func testBinaryLocatorPassthroughWhenAbsent() {
-        let locator = BinaryLocator(searchPaths: .init(path: "/nonexistent"),
-                                    isExecutable: { _ in false })
+        let locator = BinaryLocator(
+            searchPaths: .init(path: "/nonexistent"),
+            isExecutable: { _ in false })
         XCTAssertEqual(locator.resolveOrPassthrough("piper"), "piper")
     }
 
@@ -125,9 +134,11 @@ final class DIAndFixesTests: XCTestCase {
     func testSttModelCatalogMirrorsEnumFilenames() {
         for model in SttModel.allCases {
             let d = SttModelCatalog.descriptor(for: model)
-            XCTAssertEqual(d?.fileName, model.ggmlFilename,
+            XCTAssertEqual(
+                d?.fileName, model.ggmlFilename,
                 "descriptor fileName should match the enum's ggmlFilename")
-            XCTAssertEqual(d?.id, model.rawValue,
+            XCTAssertEqual(
+                d?.id, model.rawValue,
                 "descriptor id should match the enum's rawValue")
         }
         // Ordered best-first; the recommended model leads.
@@ -139,8 +150,11 @@ final class DIAndFixesTests: XCTestCase {
             fileName: "ggml-my.bin",
             origin: .huggingFace(repo: "someone/whisper-finetune", file: "ggml-my.bin"))
         XCTAssertEqual(imported.fileName, "ggml-my.bin")
-        XCTAssertEqual(imported.origin, .huggingFace(repo: "someone/whisper-finetune",
-                                                     file: "ggml-my.bin"))
+        XCTAssertEqual(
+            imported.origin,
+            .huggingFace(
+                repo: "someone/whisper-finetune",
+                file: "ggml-my.bin"))
     }
 
     // MARK: - Finding 8 / Missing 3: pre-flight disk space & checksum
@@ -172,8 +186,10 @@ final class DIAndFixesTests: XCTestCase {
         let dest = FileManager.default.temporaryDirectory
             .appendingPathComponent("vb-preflight")
         // 1 EB can't fit anywhere real.
-        XCTAssertThrowsError(try ModelDownloader.preflightFreeSpace(
-            needed: 1_600_000_000_000_000, at: dest)) { error in
+        XCTAssertThrowsError(
+            try ModelDownloader.preflightFreeSpace(
+                needed: 1_600_000_000_000_000, at: dest)
+        ) { error in
             guard case VoiceError.insufficientDiskSpace = error else {
                 return XCTFail("expected .insufficientDiskSpace, got \(error)")
             }
@@ -185,9 +201,9 @@ final class DIAndFixesTests: XCTestCase {
 
 // MARK: - helpers
 
-private extension DIAndFixesTests {
+extension DIAndFixesTests {
     /// SHA-256 hex of a UTF-8 string, mirroring the downloader's streaming sum.
-    static func sha256hex(_ s: String) -> String {
+    fileprivate static func sha256hex(_ s: String) -> String {
         var hasher = SHA256()
         hasher.update(data: s.data(using: .utf8)!)
         let digest = hasher.finalize()

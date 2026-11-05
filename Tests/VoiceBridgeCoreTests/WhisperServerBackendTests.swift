@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the whisper.cpp **server** backend (the interim step towards the
@@ -8,29 +9,31 @@ final class WhisperServerBackendTests: XCTestCase {
 
     func testEnvironmentConfiguresTheServer() {
         let backend = WhisperServerBackend.fromEnvironment([
-            "VOICEBRIDGE_WHISPER_SERVER": "127.0.0.1:8080",
+            "VOICEBRIDGE_WHISPER_SERVER": "127.0.0.1:8080"
         ])
         XCTAssertNotNil(backend)
         XCTAssertEqual(backend?.baseURL.absoluteString, "http://127.0.0.1:8080")
 
         let withScheme = WhisperServerBackend.fromEnvironment([
-            "VOICEBRIDGE_WHISPER_SERVER": "http://127.0.0.1:9000",
+            "VOICEBRIDGE_WHISPER_SERVER": "http://127.0.0.1:9000"
         ])
         XCTAssertEqual(withScheme?.baseURL.absoluteString, "http://127.0.0.1:9000")
     }
 
     func testNoServerConfiguredMeansNoBackend() {
         XCTAssertNil(WhisperServerBackend.fromEnvironment([:]))
-        XCTAssertNil(WhisperServerBackend.fromEnvironment([
-            "VOICEBRIDGE_WHISPER_SERVER": "",
-        ]))
+        XCTAssertNil(
+            WhisperServerBackend.fromEnvironment([
+                "VOICEBRIDGE_WHISPER_SERVER": ""
+            ]))
     }
 
     func testMultipartBodyCarriesTheAudio() throws {
         let audio = Data("RIFF....WAVE".utf8)
-        let body = try WhisperServerBackend.multipartBody(boundary: "BOUND",
-                                                          filename: "in.wav",
-                                                          audio: audio)
+        let body = try WhisperServerBackend.multipartBody(
+            boundary: "BOUND",
+            filename: "in.wav",
+            audio: audio)
         let text = String(decoding: body, as: UTF8.self)
         XCTAssertTrue(text.contains("--BOUND\r\n"))
         XCTAssertTrue(text.contains("name=\"file\""))
@@ -44,13 +47,13 @@ final class WhisperServerBackendTests: XCTestCase {
     func testServerJSONIsParsedIntoTimedSegments() throws {
         // The shape whisper.cpp's server returns.
         let json = """
-        { "transcription": [
-            { "text": " hello there",
-              "offsets": { "from": 0, "to": 1500 } },
-            { "text": " general kenobi",
-              "offsets": { "from": 1500, "to": 4000 } }
-        ] }
-        """
+            { "transcription": [
+                { "text": " hello there",
+                  "offsets": { "from": 0, "to": 1500 } },
+                { "text": " general kenobi",
+                  "offsets": { "from": 1500, "to": 4000 } }
+            ] }
+            """
         let meta = try XCTUnwrap(WhisperTranscriptParser.parseJSON(Data(json.utf8)))
         XCTAssertEqual(meta.segments.count, 2)
         XCTAssertEqual(meta.segments[0].text, "hello there")

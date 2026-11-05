@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// UI binding for `LiveTranscriptEngine`.
 ///
@@ -56,7 +56,7 @@ public final class LiveTranscriptViewModel: ObservableObject {
             volatile.removeAll { seg in
                 seg.id == s.id
                     || (seg.utteranceID != nil && seg.utteranceID == s.utteranceID)
-                }
+            }
             committed.append(s)
             committed.sort { $0.range.lowerBound < $1.range.lowerBound }
         case .gap:

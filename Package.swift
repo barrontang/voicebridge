@@ -17,7 +17,7 @@ let package = Package(
     products: [
         .library(name: "VoiceBridgeCore", targets: ["VoiceBridgeCore"]),
         .executable(name: "voicebridge-cli", targets: ["voicebridge-cli"]),
-        .executable(name: "voicebridge-gui", targets: ["voicebridge-gui"])
+        .executable(name: "voicebridge-gui", targets: ["voicebridge-gui"]),
     ],
     dependencies: [],
     targets: [
@@ -45,6 +45,6 @@ let package = Package(
             name: "VoiceBridgeCoreTests",
             dependencies: ["VoiceBridgeCore"],
             path: "Tests/VoiceBridgeCoreTests"
-        )
+        ),
     ]
 )

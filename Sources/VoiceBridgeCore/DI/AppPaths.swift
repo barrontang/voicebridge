@@ -20,7 +20,7 @@ import Foundation
 /// `~/Library/Application Support/VoiceBridge/` directory.
 public enum AppPaths {
 
-     /// The application-support base, created on demand.
+    /// The application-support base, created on demand.
     public static func supportDirectory() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -30,46 +30,49 @@ public enum AppPaths {
         let dir = base.appendingPathComponent("VoiceBridge", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-      }
+    }
 
-        /// The canonical settings file.
+    /// The canonical settings file.
     ///
     /// `VOICEBRIDGE_CONFIG_PATH` overrides it - the escape hatch that keeps a
     /// test (or a sandboxed run) from ever writing to the user's real
     /// settings.
     public static func configURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["VOICEBRIDGE_CONFIG_PATH"],
-           !override.isEmpty {
+            !override.isEmpty
+        {
             return URL(fileURLWithPath: override)
-            }
+        }
         return try supportDirectory().appendingPathComponent("config.json")
-      }
+    }
 
-        /// The **legacy** settings location (before this fix): the per-user temp
-       /// region. Used only to seed a one-time migration.
+    /// The **legacy** settings location (before this fix): the per-user temp
+    /// region. Used only to seed a one-time migration.
     public static func legacyConfigURL() -> URL {
         FileManager.default.temporaryDirectory
-          .appendingPathComponent("voicebridge", isDirectory: true)
-          .appendingPathComponent("config.json")
-       }
+            .appendingPathComponent("voicebridge", isDirectory: true)
+            .appendingPathComponent("config.json")
+    }
 
-      /// One-time, non-destructive migration: if a legacy config exists and the
-       /// new one does not yet, move it over. Idempotent and safe to call on every
-       /// launch — it no-ops once the new file exists.
-     @discardableResult
+    /// One-time, non-destructive migration: if a legacy config exists and the
+    /// new one does not yet, move it over. Idempotent and safe to call on every
+    /// launch — it no-ops once the new file exists.
+    @discardableResult
     public static func migrateLegacyConfigIfNeeded(
-        legacy: URL = legacyConfigURL()) -> Bool {
+        legacy: URL = legacyConfigURL()
+    ) -> Bool {
         guard let dest = try? configURL() else { return false }
         let fm = FileManager.default
         guard !fm.fileExists(atPath: dest.path),
-              fm.fileExists(atPath: legacy.path) else { return false }
+            fm.fileExists(atPath: legacy.path)
+        else { return false }
         do {
-            try fm.moveItem(at: legacy, to: dest)   // moves the file itself
-             // Best-effort prune of the now-empty legacy `voicebridge/` dir.
+            try fm.moveItem(at: legacy, to: dest)  // moves the file itself
+            // Best-effort prune of the now-empty legacy `voicebridge/` dir.
             _ = try? fm.removeItem(at: legacy.deletingLastPathComponent())
             return true
-          } catch {
+        } catch {
             return false
-          }
-      }
+        }
+    }
 }

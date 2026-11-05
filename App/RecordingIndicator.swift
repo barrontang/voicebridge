@@ -24,13 +24,14 @@ struct RecordingIndicator: View {
                     .fill(Color.red.opacity(0.18))
                     .frame(width: 26, height: 26)
                     .scaleEffect(pulse ? 1.35 : 0.85)
-                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                               value: pulse)
+                    .animation(
+                        .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                        value: pulse)
                 Image(systemName: "mic.fill")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.red)
-                }
-                .frame(width: 26, height: 26)
+            }
+            .frame(width: 26, height: 26)
 
             LevelMeter(level: level)
                 .frame(width: 74, height: 16)
@@ -40,7 +41,7 @@ struct RecordingIndicator: View {
                 .foregroundStyle(.secondary)
 
             Spacer(minLength: 0)
-            }
+        }
         .onAppear { pulse = true }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
@@ -60,9 +61,9 @@ struct LevelMeter: View {
                     .fill(Color.accentColor.opacity(0.85))
                     .frame(width: 4, height: height(for: index))
                     .animation(.easeOut(duration: 0.12), value: level)
-                }
-            Spacer(minLength: 0)
             }
+            Spacer(minLength: 0)
+        }
     }
 
     /// The middle bar is the tallest; the outer ones scale with the level.

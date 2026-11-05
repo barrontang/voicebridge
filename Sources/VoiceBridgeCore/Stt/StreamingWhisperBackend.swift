@@ -23,8 +23,10 @@ public struct WindowedWhisperAdapter: StreamingWhisperBackend {
     let fileBackend: any WhisperBackend
     let scratchDir: URL
 
-    public init(fileBackend: any WhisperBackend,
-                scratchDir: URL = FileManager.default.temporaryDirectory) {
+    public init(
+        fileBackend: any WhisperBackend,
+        scratchDir: URL = FileManager.default.temporaryDirectory
+    ) {
         self.fileBackend = fileBackend
         self.scratchDir = scratchDir
     }

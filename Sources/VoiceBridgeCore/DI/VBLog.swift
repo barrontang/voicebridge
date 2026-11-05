@@ -16,9 +16,9 @@ public enum VBLog {
     /// Reverse-DNS subsystem shared by every category.
     public static let subsystem = "com.yourorg.voicebridge"
 
-    public static let engine   = Logger(subsystem: subsystem, category: "engine")
-    public static let tts      = Logger(subsystem: subsystem, category: "tts")
-    public static let capture  = Logger(subsystem: subsystem, category: "capture")
-    public static let models   = Logger(subsystem: subsystem, category: "models")
-    public static let process  = Logger(subsystem: subsystem, category: "process")
+    public static let engine = Logger(subsystem: subsystem, category: "engine")
+    public static let tts = Logger(subsystem: subsystem, category: "tts")
+    public static let capture = Logger(subsystem: subsystem, category: "capture")
+    public static let models = Logger(subsystem: subsystem, category: "models")
+    public static let process = Logger(subsystem: subsystem, category: "process")
 }

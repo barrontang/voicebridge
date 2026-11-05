@@ -7,12 +7,12 @@ struct AudioRingBuffer {
     private var storage: [Float]
     private var writeIndex = 0
     private var filled = 0
-    private var absoluteWritten = 0           // total samples ever appended
+    private var absoluteWritten = 0  // total samples ever appended
     let sampleRate: Double
     let capacity: Int
 
     var startTime: TimeInterval { Double(absoluteWritten - filled) / sampleRate }
-    var endTime:   TimeInterval { Double(absoluteWritten) / sampleRate }
+    var endTime: TimeInterval { Double(absoluteWritten) / sampleRate }
 
     init(capacitySeconds: TimeInterval, sampleRate: Double = AudioFrame.sampleRate) {
         self.sampleRate = sampleRate
@@ -37,8 +37,8 @@ struct AudioRingBuffer {
         guard hi > lo else { return nil }
 
         let startSample = Int((lo * sampleRate).rounded())
-        let endSample   = Int((hi * sampleRate).rounded())
-        let length      = endSample - startSample
+        let endSample = Int((hi * sampleRate).rounded())
+        let length = endSample - startSample
         guard length > 0 else { return nil }
 
         let oldestSample = absoluteWritten - filled

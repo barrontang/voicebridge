@@ -24,16 +24,18 @@ public final class WAVStreamWriter {
             withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.removeItem(at: url)
-            }
+        }
         // `FileHandle(forWritingAtPath:)` does not create the file.
         if !FileManager.default.createFile(atPath: url.path, contents: nil) {
-            throw VoiceError.audioDecodeFailed(url: url.path,
+            throw VoiceError.audioDecodeFailed(
+                url: url.path,
                 reason: "could not create the file for writing")
-            }
+        }
 
         guard let handle = FileHandle(forWritingAtPath: url.path) else {
-            throw VoiceError.audioDecodeFailed(url: url.path, reason: "could not open the file for writing")
-            }
+            throw VoiceError.audioDecodeFailed(
+                url: url.path, reason: "could not open the file for writing")
+        }
         self.file = handle
 
         // A placeholder header; the sizes are patched in `finish()`.
@@ -100,7 +102,7 @@ public final class WAVStreamWriter {
         out.append(contentsOf: Array("WAVE".utf8))
         out.append(contentsOf: Array("fmt ".utf8))
         out.append(u32(16))
-        out.append(u16(1))                          // PCM
+        out.append(u16(1))  // PCM
         out.append(u16(UInt16(channels)))
         out.append(u32(UInt32(sampleRate)))
         out.append(u32(UInt32(byteRate)))

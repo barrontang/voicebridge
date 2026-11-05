@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// End-to-end test of the live engine with a fake backend: audio frames in,
@@ -20,8 +21,16 @@ final class LiveTranscriptEngineTests: XCTestCase {
             private let lock = NSLock()
             private var partials = 0
             private var finals = 0
-            var partialCount: Int { lock.lock(); defer { lock.unlock() }; return partials }
-            var finalCount: Int { lock.lock(); defer { lock.unlock() }; return finals }
+            var partialCount: Int {
+                lock.lock()
+                defer { lock.unlock() }
+                return partials
+            }
+            var finalCount: Int {
+                lock.lock()
+                defer { lock.unlock() }
+                return finals
+            }
             func record(partial: Bool) {
                 lock.lock()
                 if partial { partials += 1 } else { finals += 1 }
@@ -29,12 +38,14 @@ final class LiveTranscriptEngineTests: XCTestCase {
             }
         }
 
-        func transcribe(samples: [Float],
-                        sampleRate: Double,
-                        startTime: TimeInterval,
-                        model: String,
-                        language: String?,
-                        hint: StreamingHint) async throws -> [TranscriptSegment] {
+        func transcribe(
+            samples: [Float],
+            sampleRate: Double,
+            startTime: TimeInterval,
+            model: String,
+            language: String?,
+            hint: StreamingHint
+        ) async throws -> [TranscriptSegment] {
             calls.record(partial: hint == .partial)
             let duration = Double(samples.count) / sampleRate
             return [
@@ -47,9 +58,10 @@ final class LiveTranscriptEngineTests: XCTestCase {
     }
 
     private func frame(rms: Float, start: TimeInterval, count: Int = 1600) -> AudioFrame {
-        AudioFrame(samples: [Float](repeating: rms, count: count),
-                   startTime: start,
-                   sequence: UInt64(start * 10_000))
+        AudioFrame(
+            samples: [Float](repeating: rms, count: count),
+            startTime: start,
+            sequence: UInt64(start * 10_000))
     }
 
     func testSpeechProducesAPartialAndAFinal() async throws {

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the settings file: schema versioning, forward migration, the
@@ -43,11 +44,13 @@ final class ConfigPersistenceTests: XCTestCase {
         first.configureRoot(root)
         XCTAssertEqual(first.modelRoot.path, root.path)
         // Every engine layout follows the root.
-        XCTAssertEqual(first.paths.whisperDir.path,
-                       root.appendingPathComponent("whisper").path)
-        XCTAssertEqual(first.paths.piperVoiceDir.path,
-                       root.appendingPathComponent("piper")
-                           .appendingPathComponent("voice").path)
+        XCTAssertEqual(
+            first.paths.whisperDir.path,
+            root.appendingPathComponent("whisper").path)
+        XCTAssertEqual(
+            first.paths.piperVoiceDir.path,
+            root.appendingPathComponent("piper")
+                .appendingPathComponent("voice").path)
 
         let second = TTSConfigManager(persistURL: url)
         XCTAssertEqual(second.modelRoot.path, root.path)
@@ -61,8 +64,8 @@ final class ConfigPersistenceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         // A pre-versioning record (no `schemaVersion`).
         let legacy = """
-        { "mode": "Kokoro-82M (local)", "voice": "af_bella" }
-        """
+            { "mode": "Kokoro-82M (local)", "voice": "af_bella" }
+            """
         try Data(legacy.utf8).write(to: url)
 
         let manager = TTSConfigManager(persistURL: url)
@@ -80,8 +83,8 @@ final class ConfigPersistenceTests: XCTestCase {
         let url = tempConfigURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let future = """
-        { "schemaVersion": 999, "mode": "Edge TTS (online)" }
-        """
+            { "schemaVersion": 999, "mode": "Edge TTS (online)" }
+            """
         try Data(future.utf8).write(to: url)
 
         let manager = TTSConfigManager(persistURL: url)
@@ -104,7 +107,7 @@ final class ConfigPersistenceTests: XCTestCase {
 
         // A corrupt file must not stop the app from starting.
         let manager = TTSConfigManager(persistURL: url)
-        XCTAssertEqual(manager.selectedMode, .piper)   // the default
+        XCTAssertEqual(manager.selectedMode, .piper)  // the default
     }
 
     /// The CLI's `--engine` is a one-shot choice. It must not rewrite the
@@ -119,8 +122,9 @@ final class ConfigPersistenceTests: XCTestCase {
         manager.selectedModelFile = "a-reference.wav"
         manager.selectedSttModel = .tiny
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path),
-                       "a one-shot session must not create a settings file")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: url.path),
+            "a one-shot session must not create a settings file")
         XCTAssertNil(manager.persist())
     }
 }

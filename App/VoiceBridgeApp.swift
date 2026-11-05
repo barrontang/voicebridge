@@ -27,14 +27,14 @@ struct VoiceBridgeApp: App {
         // ── Main page: TTS + Voice-to-Text. ──
         WindowGroup {
             ContentView()
-                 .environmentObject(ttsConfig)
-             }
+                .environmentObject(ttsConfig)
+        }
 
-              // ── Config page: pick the TTS engine + voice + model root.
-              // Opens automatically as the "Settings…" (⌘,) menu item and from
-              // the main page's "⚙ Settings…" button.
+        // ── Config page: pick the TTS engine + voice + model root.
+        // Opens automatically as the "Settings…" (⌘,) menu item and from
+        // the main page's "⚙ Settings…" button.
         Settings {
             SettingsView(ttsConfig: ttsConfig)
-              }
-       }
+        }
+    }
 }
