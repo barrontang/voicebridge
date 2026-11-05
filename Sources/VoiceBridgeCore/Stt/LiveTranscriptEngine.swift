@@ -47,6 +47,8 @@ public actor LiveTranscriptEngine {
     private var isRunning = false
 
     private var partialTask: Task<Void, Never>?
+    private var partialInFlight = false
+    private var partialPending = false
     private var finalTask: Task<Void, Never>?
     private var pendingFinals: [(range: Range<TimeInterval>, utteranceID: UUID?)] = []
 
@@ -78,6 +80,8 @@ public actor LiveTranscriptEngine {
         lastPartialAt = -.infinity
         committedEnd = 0
         hasSeenAudio = false
+        partialInFlight = false
+        partialPending = false
         reconciler.reset()
         ring = AudioRingBuffer(capacitySeconds: config.ringBufferSeconds)
         segmenter = UtteranceSegmenter()
@@ -123,6 +127,8 @@ public actor LiveTranscriptEngine {
     private func shutdown() {
         partialTask?.cancel()
         partialTask = nil
+        partialInFlight = false
+        partialPending = false
         finalTask?.cancel()
         finalTask = nil
         pendingFinals.removeAll()
@@ -161,12 +167,28 @@ public actor LiveTranscriptEngine {
         }
     }
 
-    // MARK: - Partial path (cancellable, latest wins)
+    // MARK: - Partial path (coalesced: never cancel a running pass)
 
+    /// Kick a volatile pass, unless one is still running.
+    ///
+    /// A partial re-transcribes the **whole open utterance**, so it gets slower
+    /// as the sentence grows. This used to cancel the in-flight pass on every
+    /// 1.2 s tick to replace it with a longer one — which meant that once an
+    /// utterance ran longer than a pass takes, *every* pass was killed before
+    /// whisper returned and the caption never appeared at all. The log showed
+    /// it as `whisper-cli exited with status 15` (SIGTERM from our own cancel).
+    ///
+    /// Now the running pass is allowed to finish and a follow-up pass is
+    /// coalesced behind it, so the caption updates at the pace whisper can
+    /// actually deliver instead of never.
     private func maybeKickPartial() {
+        guard isRunning else { return }
         let now = ring.endTime
         guard now - lastPartialAt >= config.partialInterval else { return }
-        lastPartialAt = now
+        guard !partialInFlight else {
+            partialPending = true
+            return
+        }
 
         // The partial covers the *open utterance* (from its start to now), so
         // the caption reads as a sentence. When no utterance is open we fall
@@ -175,8 +197,8 @@ public actor LiveTranscriptEngine {
         let range = lo..<now
         guard let (samples, startTime) = audioForWindow(range) else { return }
 
-        // Supersede in-flight partial — newer audio is more valuable.
-        partialTask?.cancel()
+        lastPartialAt = now
+        partialInFlight = true
         let idx = nextWindowIndex()
         let utteranceID = segmenter.currentUtteranceID
         let backend = self.backend
@@ -184,8 +206,10 @@ public actor LiveTranscriptEngine {
         let language = config.language
 
         partialTask = Task { [weak self] in
+            var produced: [TranscriptSegment] = []
+            var failure: String?
             do {
-                let segments = try await backend.transcribe(
+                produced = try await backend.transcribe(
                     samples: samples,
                     sampleRate: AudioFrame.sampleRate,
                     startTime: startTime,
@@ -193,25 +217,41 @@ public actor LiveTranscriptEngine {
                     language: language,
                     hint: .partial
                 )
-                if Task.isCancelled { return }
-                await self?.apply(
-                    segments: segments,
+            } catch {
+                if !Task.isCancelled { failure = error.localizedDescription }
+            }
+            guard let self else { return }
+            if let failure {
+                await self.reportPartialFailure(range, failure)
+            } else if !Task.isCancelled {
+                await self.apply(
+                    segments: produced,
                     windowRange: range,
                     windowIndex: idx,
                     utteranceID: utteranceID,
                     isFinal: false)
-            } catch is CancellationError {
-                // expected
-            } catch {
-                // A silent failure here is why "the button does nothing" was
-                // undebuggable: the UI showed an empty transcript and nothing
-                // anywhere said the transcription had failed.
-                VBLog.engine.error(
-                    "live partial failed (\(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s): \(error.localizedDescription, privacy: .public)"
-                )
-                await self?.emitGap(range)
             }
+            await self.partialDidFinish()
         }
+    }
+
+    /// The running pass is done; if audio arrived meanwhile, go again now.
+    private func partialDidFinish() {
+        partialInFlight = false
+        guard partialPending, isRunning else {
+            partialPending = false
+            return
+        }
+        partialPending = false
+        partialTask = nil
+        maybeKickPartial()
+    }
+
+    private func reportPartialFailure(_ range: Range<TimeInterval>, _ message: String) {
+        VBLog.engine.error(
+            "live partial failed (\(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s): \(message, privacy: .public)"
+        )
+        emitGap(range)
     }
 
     // MARK: - Final path (serial FIFO, never cancelled)

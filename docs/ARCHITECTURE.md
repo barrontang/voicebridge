@@ -104,6 +104,12 @@ The current pipeline is:
 2. **Timed segments** (`WhisperTranscriptParser`) — whisper's JSON carries
    per-segment `offsets`; they are parsed and shifted into the window's
    absolute time base.
+   **Partial scheduling.** A partial re-transcribes the whole open utterance, so
+   it slows down as the sentence grows. The scheduler therefore *coalesces*: it
+   lets the running pass finish and queues one follow-up, instead of cancelling
+   the pass on every tick. Cancelling made long utterances produce no caption
+   at all (every pass was killed before whisper returned; the log showed
+   `whisper-cli exited with status 15`).
 3. **Reconciliation** (`TranscriptReconciler`) — a *watermark* (the end of the
    last committed utterance) drops everything that was already committed, so
    the overlap between two passes is never shown twice. A final utterance is

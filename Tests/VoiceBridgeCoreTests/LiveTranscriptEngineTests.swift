@@ -254,6 +254,99 @@ final class LiveTranscriptEngineTests: XCTestCase {
             calls[1].startTime, calls[0].startTime + calls[0].duration - 0.12)
     }
 
+    // MARK: - Partial scheduling
+
+    /// A slow backend must not be cancelled mid-flight.
+    ///
+    /// The old scheduler cancelled the running pass on every tick. Once an
+    /// utterance grew longer than one pass, every pass was killed before it
+    /// returned and the caption never appeared — the "live shows nothing"
+    /// report. Passes must now run one at a time, and none may be cancelled.
+    func testPartialPassesAreCoalescedNotCancelled() async throws {
+        let backend = SlowBackend(delay: .milliseconds(120))
+        var config = LiveTranscriptEngine.Config()
+        config.partialInterval = 0.02  // far faster than a pass takes
+        config.ringBufferSeconds = 30
+
+        let engine = LiveTranscriptEngine(backend: backend, config: config)
+        let stream = await engine.start()
+        let drain = Task { for await _ in stream {} }
+        defer { drain.cancel() }
+
+        var t = 0.0
+        for _ in 0..<25 {  // 2.5 s of speech
+            await engine.ingest(frame(rms: 0.5, start: t))
+            t += 0.1
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        try? await Task.sleep(for: .milliseconds(400))
+        await engine.stop()
+
+        let stats = backend.stats
+        XCTAssertGreaterThan(stats.calls, 0, "expected at least one partial pass")
+        XCTAssertEqual(stats.cancelled, 0, "no pass may be cancelled just to start a newer one")
+        XCTAssertEqual(stats.maxConcurrent, 1, "partial passes must not overlap")
+        XCTAssertLessThan(stats.calls, 25, "passes must be coalesced, not one per tick")
+    }
+
+    /// A backend whose passes take longer than the partial interval.
+    private struct SlowBackend: StreamingWhisperBackend {
+        struct Stats: Sendable {
+            var calls = 0
+            var cancelled = 0
+            var maxConcurrent = 0
+            var concurrent = 0
+        }
+
+        final class Box: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = Stats()
+            var stats: Stats {
+                lock.lock()
+                defer { lock.unlock() }
+                return value
+            }
+            func began() {
+                lock.lock()
+                value.calls += 1
+                value.concurrent += 1
+                value.maxConcurrent = max(value.maxConcurrent, value.concurrent)
+                lock.unlock()
+            }
+            func ended(cancelled: Bool) {
+                lock.lock()
+                value.concurrent -= 1
+                if cancelled { value.cancelled += 1 }
+                lock.unlock()
+            }
+        }
+
+        let delay: Duration
+        let box = Box()
+        var stats: Stats { box.stats }
+
+        func transcribe(
+            samples: [Float], sampleRate: Double, startTime: TimeInterval,
+            model: String, language: String?, hint: StreamingHint
+        ) async throws -> [TranscriptSegment] {
+            box.began()
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                box.ended(cancelled: true)
+                throw error
+            }
+            box.ended(cancelled: false)
+            let duration = Double(samples.count) / sampleRate
+            return [
+                TranscriptSegment(
+                    text: "slow",
+                    range: startTime..<(startTime + duration),
+                    stability: hint == .final ? .stable : .volatile)
+            ]
+        }
+    }
+
     /// Collects events from the engine's stream.
     private actor EventCollector {
         private(set) var events: [TranscriptEvent] = []
