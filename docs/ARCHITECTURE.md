@@ -81,6 +81,13 @@ mic ─▶ AVAudioEngine tap (real-time thread)
 
 * The tap never allocates and never blocks on anything but a short mutex, so
   it is safe to leave installed for the life of the app.
+* **Never install a tap on an input node with no valid hardware format.**
+  `installTap` raises an *Objective-C* exception in that case; Swift cannot
+  catch one, and unwinding it through Swift frames corrupts the concurrency
+  runtime — the app segfaulted seconds later inside SwiftUI hit-testing
+  (`swift_task_isMainExecutorImpl`, corrupted `SerialExecutorRef`). The router
+  checks the capture device and the *input* format first and throws
+  `VoiceError.audioDeviceUnavailable` instead.
 * `AudioResampler` is the single resampling implementation (live path *and*
   file transcoder), with a two-pole anti-aliasing pre-filter — without it the
   8–24 kHz band folds back down and the speech turns metallic.

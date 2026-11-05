@@ -170,27 +170,66 @@ public final class AudioInputRouter: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
+    /// What to tell the user when the default input device has no usable
+    /// hardware format.
+    public static let missingDeviceReason =
+        "no input device — connect one, or choose it in System Settings › Sound › Input"
+
+    /// The problem with an input format, or `nil` when a tap can be installed.
+    ///
+    /// Pure so the guard is unit-testable without an audio device.
+    nonisolated static func formatProblem(
+        sampleRate: Double,
+        channelCount: AVAudioChannelCount
+    ) -> String? {
+        guard sampleRate > 0 else { return "the input device reports no sample rate" }
+        guard channelCount > 0 else { return "the input device reports no channels" }
+        return nil
+    }
+
     /// Install the tap and start pumping. Throws if the input device is
     /// unavailable.
+    ///
+    /// **Why the format checks are here:** `installTap` raises an *Objective-C*
+    /// exception ("input hw format invalid") when the input node has no valid
+    /// hardware format — e.g. no default input device. Swift cannot catch an
+    /// Objective-C exception, and unwinding one through Swift frames corrupts
+    /// the concurrency runtime: the app then segfaults seconds later inside
+    /// SwiftUI's hit-testing (`swift_task_isMainExecutorImpl` with a corrupted
+    /// `SerialExecutorRef`). That was a real crash report. A user-visible error
+    /// is the only safe outcome, so validate before installing anything.
     public func start() throws {
         guard !isRunning else { return }
 
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        let rate = format.sampleRate
-        guard rate > 0 else {
-            throw VoiceError.audioDecodeFailed(
-                url: "(tap)",
-                reason: "the input device reported no sample rate")
+        // Check the device first: touching `inputNode` with no input hardware
+        // is what raises the exception.
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            throw VoiceError.audioDeviceUnavailable(reason: Self.missingDeviceReason)
         }
-        inputSampleRate = rate
+
+        let input = engine.inputNode
+        // The *input* format is the hardware format; `outputFormat` reports a
+        // plausible-looking 44.1 kHz even when the input side is invalid, which
+        // is exactly how the invalid tap slipped through before.
+        let format = input.inputFormat(forBus: 0)
+        if let problem = Self.formatProblem(
+            sampleRate: format.sampleRate, channelCount: format.channelCount)
+        {
+            throw VoiceError.audioDeviceUnavailable(reason: problem)
+        }
+        inputSampleRate = format.sampleRate
 
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.ingest(buffer)
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
         isRunning = true
         startPump()
     }

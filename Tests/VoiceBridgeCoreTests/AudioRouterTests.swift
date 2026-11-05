@@ -201,3 +201,37 @@ final class WindowedAdapterTests: XCTestCase {
         XCTAssertEqual(segments[0].stability, .volatile)
     }
 }
+
+// MARK: - Input device guard
+
+/// Installing a tap on an input node with no valid hardware format raises an
+/// *Objective-C* exception, which Swift cannot catch and which corrupts the
+/// concurrency runtime on the way out (the app crashed in SwiftUI hit-testing
+/// seconds later). The guard must reject the format first.
+final class AudioInputGuardTests: XCTestCase {
+
+    func testAZeroSampleRateIsRejected() {
+        XCTAssertNotNil(
+            AudioInputRouter.formatProblem(sampleRate: 0, channelCount: 1))
+    }
+
+    func testAZeroChannelCountIsRejected() {
+        XCTAssertNotNil(
+            AudioInputRouter.formatProblem(sampleRate: 48_000, channelCount: 0))
+    }
+
+    func testAValidFormatIsAccepted() {
+        XCTAssertNil(
+            AudioInputRouter.formatProblem(sampleRate: 48_000, channelCount: 2))
+    }
+
+    /// The user must be told what to do, not left with a generic failure.
+    func testTheErrorExplainsWhatToDo() {
+        let message = VoiceError.audioDeviceUnavailable(
+            reason: AudioInputRouter.missingDeviceReason
+        ).errorDescription
+        XCTAssertEqual(
+            message, "Microphone unavailable: \(AudioInputRouter.missingDeviceReason)")
+        XCTAssertTrue(message?.contains("System Settings") ?? false)
+    }
+}
