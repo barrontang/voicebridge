@@ -199,6 +199,18 @@ struct ContentView: View {
                     .border(.quaternary)
                     .accessibilityLabel("Transcript")
 
+                    // A failed transcription used to look exactly like "you
+                    // said nothing": an empty box and no explanation.
+                    if live.failureCount > 0, displayTranscript.isEmpty {
+                        Label(
+                            "\(live.failureCount) transcription attempt(s) failed — "
+                                + "check the model and Console logs.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
+
                     // Save row.
                     HStack(spacing: 10) {
                         Button {
@@ -529,7 +541,9 @@ struct ContentView: View {
                 }
                 sttStatus =
                     live.transcript.isEmpty
-                    ? "No speech detected."
+                    ? (live.failureCount > 0
+                        ? "No transcript: \(live.failureCount) attempt(s) failed — see Console."
+                        : "No speech detected.")
                     : "Live transcript ready."
             }
             sttStatus = "Stopping live…"

@@ -11,6 +11,8 @@ import Foundation
 public final class LiveTranscriptViewModel: ObservableObject {
     @Published public private(set) var committed: [TranscriptSegment] = []
     @Published public private(set) var volatile: [TranscriptSegment] = []
+    /// Transcription attempts that failed (see `VBLog.engine` for the error).
+    @Published public private(set) var failureCount = 0
 
     private let engine: LiveTranscriptEngine
     private var consumeTask: Task<Void, Never>?
@@ -18,6 +20,7 @@ public final class LiveTranscriptViewModel: ObservableObject {
     public init(engine: LiveTranscriptEngine) { self.engine = engine }
 
     public func start() {
+        failureCount = 0
         consumeTask?.cancel()
         consumeTask = Task { [weak self] in
             guard let self else { return }
@@ -60,8 +63,9 @@ public final class LiveTranscriptViewModel: ObservableObject {
             committed.append(s)
             committed.sort { $0.range.lowerBound < $1.range.lowerBound }
         case .gap:
-            // gap marker – insert a gap marker view at the range
-            break
+            // The engine could not transcribe this window; the UI shows a
+            // hint instead of an empty screen.
+            failureCount += 1
         case .finished:
             volatile = []
         }

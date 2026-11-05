@@ -77,6 +77,11 @@ public final class LiveSttSession: ObservableObject {
     @Published public private(set) var status = "idle - press Live to start"
     /// The transcript so far: committed sentences plus the live one.
     @Published public private(set) var transcript = ""
+    /// Transcription attempts that failed. The UI turns this into "see logs"
+    /// instead of leaving the user with a blank transcript.
+    @Published public private(set) var failureCount = 0
+    /// Frames received in this session (0 = the mic is not delivering).
+    private var framesSeen = 0
     /// The input level of the last frame (0…1, roughly -60…0 dBFS).
     /// Cheap to compute and the only honest way to show "it hears you".
     @Published public private(set) var level: Float = 0
@@ -118,12 +123,20 @@ public final class LiveSttSession: ObservableObject {
         // A new session starts from a clean transcript: the previous session's
         // text otherwise lingered in the view until the first new caption.
         transcript = ""
+        failureCount = 0
+        framesSeen = 0
         level = 0
 
         do {
             try await startPipeline()
             phase = .live
             status = "Listening (live)"
+            // If the mic never delivers, say so instead of listening forever.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, self.phase == .live, self.framesSeen == 0 else { return }
+                self.status = "No microphone audio — check the input device."
+            }
         } catch {
             phase = .idle
             status = "Could not start the mic: \(error.localizedDescription)"
@@ -192,6 +205,9 @@ public final class LiveSttSession: ObservableObject {
         viewModel.$volatile
             .sink { [weak self] _ in self?.refreshTranscript() }
             .store(in: &cancellables)
+        viewModel.$failureCount
+            .sink { [weak self] count in self?.failureCount = count }
+            .store(in: &cancellables)
 
         // The event stream is consumed by the view model.
         viewModel.start()
@@ -205,7 +221,9 @@ public final class LiveSttSession: ObservableObject {
         let sink = router.addSink { [weak self] frame in
             let rms = Self.rms(of: frame.samples)
             Task { @MainActor [weak self] in
-                self?.level = min(1, rms * 4)
+                guard let self else { return }
+                self.framesSeen += 1
+                self.level = min(1, rms * 4)
             }
             continuation.yield(frame)
         }

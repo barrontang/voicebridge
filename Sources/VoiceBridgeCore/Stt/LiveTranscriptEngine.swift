@@ -42,6 +42,8 @@ public actor LiveTranscriptEngine {
     /// audio would duplicate the previous words (or, once the watermark drops
     /// them, swallow the first word of the next chunk).
     private var committedEnd: TimeInterval = 0
+    /// True once audio has reached the ring; used for the "no input" log.
+    private var hasSeenAudio = false
     private var isRunning = false
 
     private var partialTask: Task<Void, Never>?
@@ -60,6 +62,12 @@ public actor LiveTranscriptEngine {
 
     public func start() -> AsyncStream<TranscriptEvent> {
         shutdown()
+        // The logger's interpolation is an escaping closure; copy the value so
+        // it does not capture `self`.
+        let cfg = config
+        VBLog.engine.info(
+            "live start: model=\(cfg.model, privacy: .public) language=\(cfg.language ?? "auto", privacy: .public) window=\(cfg.windowSeconds, privacy: .public)s overlap=\(cfg.overlapSeconds, privacy: .public)s partialEvery=\(cfg.partialInterval, privacy: .public)s"
+        )
 
         let (stream, cont) = AsyncStream<TranscriptEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(128)
@@ -69,6 +77,7 @@ public actor LiveTranscriptEngine {
         windowIndex = 0
         lastPartialAt = -.infinity
         committedEnd = 0
+        hasSeenAudio = false
         reconciler.reset()
         ring = AudioRingBuffer(capacitySeconds: config.ringBufferSeconds)
         segmenter = UtteranceSegmenter()
@@ -132,6 +141,10 @@ public actor LiveTranscriptEngine {
 
     public func ingest(_ frame: AudioFrame) {
         guard isRunning else { return }
+        if !hasSeenAudio {
+            hasSeenAudio = true
+            VBLog.capture.info("live: first audio frame received")
+        }
         ring.append(frame)
 
         for boundary in segmenter.consume(frame) {
@@ -190,6 +203,12 @@ public actor LiveTranscriptEngine {
             } catch is CancellationError {
                 // expected
             } catch {
+                // A silent failure here is why "the button does nothing" was
+                // undebuggable: the UI showed an empty transcript and nothing
+                // anywhere said the transcription had failed.
+                VBLog.engine.error(
+                    "live partial failed (\(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s): \(error.localizedDescription, privacy: .public)"
+                )
                 await self?.emitGap(range)
             }
         }
@@ -231,7 +250,13 @@ public actor LiveTranscriptEngine {
                     isFinal: true)
                 // Only now may the next window's pre-roll stop at this point.
                 committedEnd = max(committedEnd, range.upperBound)
+                VBLog.engine.info(
+                    "live final \(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s → \(segments.count, privacy: .public) segment(s)"
+                )
             } catch {
+                VBLog.engine.error(
+                    "live final failed (\(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s): \(error.localizedDescription, privacy: .public)"
+                )
                 emitGap(range)
             }
         }
