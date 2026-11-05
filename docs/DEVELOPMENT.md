@@ -3,7 +3,7 @@
 This is the working guide for changing VoiceBridge: the local loop, the rules
 CI enforces, the conventions a reviewer will expect, and what to build next.
 
-- **Status**: `VERSION` 1.2.0 · 165 unit tests · 5 TTS engines · 3 STT paths
+- **Status**: `VERSION` 1.2.0 · 166 unit tests · 5 TTS engines · 3 STT paths
 - **Companions**: [`ARCHITECTURE.md`](ARCHITECTURE.md) (why the code looks like
   this) · [`RUNBOOK.md`](RUNBOOK.md) (how to install/run it)
 

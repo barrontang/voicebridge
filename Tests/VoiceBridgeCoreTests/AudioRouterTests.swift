@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 
 @testable import VoiceBridgeCore
@@ -223,6 +224,22 @@ final class AudioInputGuardTests: XCTestCase {
     func testAValidFormatIsAccepted() {
         XCTAssertNil(
             AudioInputRouter.formatProblem(sampleRate: 48_000, channelCount: 2))
+    }
+
+    /// The real crash scenario: no input device. Starting must throw a Swift
+    /// error instead of letting `installTap` raise an Objective-C exception
+    /// through the Swift frames (which is what corrupted the runtime and
+    /// segfaulted the app in SwiftUI's hit-testing).
+    func testStartingWithoutAnInputDeviceThrowsInsteadOfRaising() throws {
+        guard AVCaptureDevice.default(for: .audio) == nil else {
+            throw XCTSkip("this Mac has an input device; the guard cannot be exercised")
+        }
+        let router = AudioInputRouter()
+        XCTAssertThrowsError(try router.start()) { error in
+            guard case VoiceError.audioDeviceUnavailable = error else {
+                return XCTFail("expected .audioDeviceUnavailable, got \(error)")
+            }
+        }
     }
 
     /// The user must be told what to do, not left with a generic failure.
