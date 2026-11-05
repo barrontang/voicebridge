@@ -1,6 +1,6 @@
-import Foundation
-import Combine
 import AVFoundation
+import Combine
+import Foundation
 
 /// The live speech-to-text session: mic → router → engine → transcript.
 ///
@@ -46,13 +46,15 @@ public final class LiveSttSession: ObservableObject {
         /// model stays resident - no process spawn, no model load).
         public var serverURL: URL?
 
-        public init(model: SttModel = .largeV3Turbo,
-                    modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
-                    scratchDir: URL = ModelPaths.fromEnvironment().cacheDir,
-                    partialInterval: TimeInterval = 1.2,
-                    windowSeconds: TimeInterval = 4.0,
-                    ringBufferSeconds: TimeInterval = 60.0,
-                    serverURL: URL? = nil) {
+        public init(
+            model: SttModel = .largeV3Turbo,
+            modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
+            scratchDir: URL = ModelPaths.fromEnvironment().cacheDir,
+            partialInterval: TimeInterval = 1.2,
+            windowSeconds: TimeInterval = 4.0,
+            ringBufferSeconds: TimeInterval = 60.0,
+            serverURL: URL? = nil
+        ) {
             self.model = model
             self.modelDirectory = modelDirectory
             self.scratchDir = scratchDir
@@ -60,7 +62,7 @@ public final class LiveSttSession: ObservableObject {
             self.windowSeconds = windowSeconds
             self.ringBufferSeconds = ringBufferSeconds
             self.serverURL = serverURL
-            }
+        }
     }
 
     @Published public private(set) var phase: Phase = .idle
@@ -100,20 +102,26 @@ public final class LiveSttSession: ObservableObject {
     public func start() async {
         guard phase == .idle else { return }
         guard await Self.requestMicPermission() else {
-            status = "Microphone denied - enable it in System Settings > Privacy & Security > Microphone."
+            status =
+                "Microphone denied - enable it in System Settings > Privacy & Security > Microphone."
             return
-            }
+        }
+
+        // A new session starts from a clean transcript: the previous session's
+        // text otherwise lingered in the view until the first new caption.
+        transcript = ""
+        level = 0
 
         do {
             try await startPipeline()
             phase = .live
             status = "Listening (live)"
-            } catch {
+        } catch {
             phase = .idle
             status = "Could not start the mic: \(error.localizedDescription)"
             await stopPipeline()
-            }
         }
+    }
 
     /// Stop listening. The engine flushes the open utterance, so the last
     /// sentence is not lost.
@@ -142,7 +150,7 @@ public final class LiveSttSession: ObservableObject {
         phase = .idle
         status = "Idle."
         level = 0
-        }
+    }
 
     // MARK: - Pipeline
 
@@ -190,9 +198,9 @@ public final class LiveSttSession: ObservableObject {
             let rms = Self.rms(of: frame.samples)
             Task { @MainActor [weak self] in
                 self?.level = min(1, rms * 4)
-                }
-            continuation.yield(frame)
             }
+            continuation.yield(frame)
+        }
         sinkID = sink
 
         frameConsumer = Task { [weak self] in
@@ -216,7 +224,7 @@ public final class LiveSttSession: ObservableObject {
         await viewModel?.stop()
         engine = nil
         viewModel = nil
-        }
+    }
 
     private func refreshTranscript() {
         guard let viewModel else { return }
@@ -225,7 +233,7 @@ public final class LiveSttSession: ObservableObject {
         transcript = all.map(\.text)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        }
+    }
 
     /// The root-mean-square of a frame (a cheap level estimate).
     nonisolated static func rms(of samples: [Float]) -> Float {

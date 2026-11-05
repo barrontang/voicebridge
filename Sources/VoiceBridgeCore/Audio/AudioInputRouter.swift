@@ -1,5 +1,5 @@
-import Foundation
 import AVFoundation
+import Foundation
 
 /// A lock-protected, pre-allocated sample buffer for the live capture path.
 ///
@@ -69,7 +69,7 @@ final class AudioSampleRing: @unchecked Sendable {
     }
 }
 
-/// The single microphone tap for the whole app.
+/// One microphone tap, fanning frames out to any number of subscribers.
 ///
 /// **Finding 6, resolved.** `MicrophoneCapture` (push-to-talk) and the live
 /// streaming controller each opened their *own* tap on the input device, so
@@ -77,6 +77,12 @@ final class AudioSampleRing: @unchecked Sendable {
 /// `AVAudioEngine` tap and fans the audio out to any number of subscribers
 /// ("sinks"), so a recorder and a live transcriber can listen at the same
 /// time without a second device session.
+///
+/// **Scope:** one tap *per router instance*. `LiveSttSession` and
+/// `PushToTalkSession` each own one, so two `AVAudioEngine`s can exist if both
+/// are started at once — the UI prevents that (each button is disabled while
+/// the other runs), and a second `start()` on the *same* router is a no-op.
+/// Share an instance between them before adding a third consumer.
 ///
 /// Shape of the data flow:
 ///
@@ -103,15 +109,17 @@ public final class AudioInputRouter: @unchecked Sendable {
         /// How often the pump wakes up to drain the ring.
         public var pumpInterval: TimeInterval
 
-        public init(targetSampleRate: Double = 16_000,
-                    frameDuration: TimeInterval = 0.1,
-                    maxBufferedSeconds: TimeInterval = 30,
-                    pumpInterval: TimeInterval = 0.01) {
+        public init(
+            targetSampleRate: Double = 16_000,
+            frameDuration: TimeInterval = 0.1,
+            maxBufferedSeconds: TimeInterval = 30,
+            pumpInterval: TimeInterval = 0.01
+        ) {
             self.targetSampleRate = targetSampleRate
             self.frameDuration = frameDuration
             self.maxBufferedSeconds = maxBufferedSeconds
             self.pumpInterval = pumpInterval
-            }
+        }
     }
 
     /// Receives one frame of 16 kHz mono audio.
@@ -171,15 +179,16 @@ public final class AudioInputRouter: @unchecked Sendable {
         let format = input.outputFormat(forBus: 0)
         let rate = format.sampleRate
         guard rate > 0 else {
-            throw VoiceError.audioDecodeFailed(url: "(tap)",
+            throw VoiceError.audioDecodeFailed(
+                url: "(tap)",
                 reason: "the input device reported no sample rate")
-            }
+        }
         inputSampleRate = rate
 
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.ingest(buffer)
-            }
+        }
         engine.prepare()
         try engine.start()
         isRunning = true
@@ -221,7 +230,7 @@ public final class AudioInputRouter: @unchecked Sendable {
             var acc: Float = 0
             for c in 0..<channelCount { acc += channels[c][i] }
             scratch[i] = acc / Float(channelCount)
-           }
+        }
         scratch.withUnsafeBufferPointer { buf in
             if let base = buf.baseAddress {
                 ring.write(base, count: frames)
@@ -250,8 +259,9 @@ public final class AudioInputRouter: @unchecked Sendable {
                 guard let self else { return }
                 let native = ring.drain(maxCount: 64_000)
                 if !native.isEmpty {
-                    pending.append(contentsOf: AudioResampler.resample(
-                        native, from: self.inputSampleRate, to: target))
+                    pending.append(
+                        contentsOf: AudioResampler.resample(
+                            native, from: self.inputSampleRate, to: target))
 
                     while pending.count >= frameSamples {
                         let chunk = Array(pending.prefix(frameSamples))

@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 
 /// Downloads STT model files with the three things the shell-script era lacked:
 /// progress, checksum verification, and an **atomic, crash-safe write** (Finding 8
@@ -21,85 +21,114 @@ import CryptoKit
 /// caller can refuse a multi-GB pull on a full volume *before* starting it.
 public actor ModelDownloader {
 
-         /// A monotonic snapshot of a download in flight.
-     public struct Progress: Sendable, Equatable {
+    /// A monotonic snapshot of a download in flight.
+    public struct Progress: Sendable, Equatable {
         public let bytesReceived: Int64
-        public let totalBytes: Int64?               // nil = unknown length
+        public let totalBytes: Int64?  // nil = unknown length
         public init(bytesReceived: Int64, totalBytes: Int64?) {
             self.bytesReceived = bytesReceived
             self.totalBytes = totalBytes
-             }
-           /// 0…1, or 0 when the total length is unknown.
+        }
+        /// 0…1, or 0 when the total length is unknown.
         public var fractionComplete: Double {
             guard let total = totalBytes, total > 0 else { return 0 }
             return min(1.0, Double(bytesReceived) / Double(total))
-             }
         }
+    }
 
-         /// Pre-flight a download: throws early if the host can't hold the file.
-         ///
-         /// Uses `volumeAvailableCapacityForImportantUsage` (not `freeSpace`) so we
-         /// count reclaimable space the way macOS itself does — a full-looking
-         /// disk with a big cache isn't treated as out of space.
-      @discardableResult
+    /// Pre-flight a download: throws early if the host can't hold the file.
+    ///
+    /// Uses `volumeAvailableCapacityForImportantUsage` (not `freeSpace`) so we
+    /// count reclaimable space the way macOS itself does — a full-looking
+    /// disk with a big cache isn't treated as out of space.
+    @discardableResult
     public static func preflightFreeSpace(needed: Int64, at url: URL)
-        throws -> Int64 {
+        throws -> Int64
+    {
         guard needed > 0 else {
             throw VoiceError.insufficientDiskSpace(needed: needed, available: 0, at: url.path)
-             }
-          // URLResourceKey-based, not raw freeSpace.
+        }
+        // URLResourceKey-based, not raw freeSpace.
         let values = try url.deletingLastPathComponent().resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         let available = values.volumeAvailableCapacityForImportantUsage ?? 0
         if available < needed {
-            throw VoiceError.insufficientDiskSpace(needed: needed, available: available, at: url.path)
-             }
-        return available
+            throw VoiceError.insufficientDiskSpace(
+                needed: needed, available: available, at: url.path)
         }
+        return available
+    }
 
-         /// Downloads `url` into `destination`, streaming `Progress`.
-         ///
-         /// Bytes land in `destination + ".partial"`; on full success the sidecar
-         /// is atomically `rename`-d to `destination`. A cancellation or error prunes
-         /// the `.partial`, so a corrupt file can never masquerade as a model.
-     public func download(_ url: URL,
-                         to destination: URL)
-        -> AsyncThrowingStream<Progress, Error> {
+    /// Downloads `url` into `destination`, streaming `Progress`.
+    ///
+    /// Bytes land in `destination + ".partial"`; on full success the sidecar
+    /// is atomically `rename`-d to `destination`. A cancellation or error prunes
+    /// the `.partial`, so a corrupt file can never masquerade as a model.
+    public func download(
+        _ url: URL,
+        to destination: URL
+    )
+        -> AsyncThrowingStream<Progress, Error>
+    {
         AsyncThrowingStream { continuation in
-            let job = DownloadJob(from: url,
-                                  into: destination,
-                           continuation: continuation)
-              // Keep the job alive for the stream's life; cancel it on termination.
+            let job = DownloadJob(
+                from: url,
+                into: destination,
+                continuation: continuation)
+            // Keep the job alive for the stream's life; cancel it on termination.
             let canceller: @Sendable () -> Void = job.canceller()
             continuation.onTermination = { @Sendable _ in canceller() }
             job.start()
-           }
         }
+    }
 }
 
 // MARK: - SHA-256 verification
 
-public extension ModelDownloader {
-         /// Streams a file through SHA-256 and compares (case-insensitively) to
-         /// `expected`. Throws `.checksumMismatch` on disagreement.
-    static func verifySHA256(of url: URL, expected: String) async throws {
+extension ModelDownloader {
+    /// Streams a file through SHA-256 and compares (case-insensitively) to
+    /// `expected`. Throws `.checksumMismatch` on disagreement.
+    public static func verifySHA256(of url: URL, expected: String) async throws {
+        let actual = try sha256Hex(of: url)
+        let normExpected = expected.lowercased()
+        if actual != normExpected {
+            throw VoiceError.checksumMismatch(
+                url: url.path,
+                expected: normExpected,
+                actual: actual)
+        }
+    }
+
+    /// The hex SHA-256 of a file on disk.
+    ///
+    /// Synchronous on purpose: the download job calls it on its own delegate
+    /// queue, where blocking for a couple of seconds (a 1.6 GB model) is
+    /// cheaper than handing a half-verified file to the caller.
+    public static func sha256Hex(of url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
-        var finished = false
-        while !finished {
+        while true {
             let chunk = try handle.read(upToCount: 1 << 20) ?? Data()
-            if chunk.isEmpty { finished = true } else { hasher.update(data: chunk) }
-             }
-        let digest = hasher.finalize()
-        let actual = digest.map { String(format: "%02x", $0) }.joined()
-        let normExpected = expected.lowercased()
-        if actual != normExpected {
-          throw VoiceError.checksumMismatch(url: url.path,
-                                            expected: normExpected,
-                                             actual: actual)
-           }
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
         }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Throws unless the server answered `200 OK`.
+    ///
+    /// `URLSession` reports a 404 or a 500 as a *successful* transfer, so
+    /// without this check an HTML error page is written to disk, renamed to
+    /// `ggml-large-v3-turbo.bin`, and reported as an installed model.
+    public static func validate(response: URLResponse?) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard http.statusCode == 200 else {
+            throw VoiceError.downloadFailed(
+                url: http.url?.absoluteString ?? "(unknown)",
+                reason: "the server answered HTTP \(http.statusCode)")
+        }
+    }
 }
 
 // MARK: - Job
@@ -107,108 +136,138 @@ public extension ModelDownloader {
 /// A reference type that owns the `URLSession`, its delegate, and its task for
 /// the life of a single download — the canonical way to keep a delegate alive
 /// without capturing it in the (value-typed) stream closure.
-// SAFETY (@unchecked Sendable): the mutable state (`session`, `task`,
-// `didFinish`) is only touched from the URLSession delegate queue, which
-// serialises those callbacks.
+///
+/// **Threading.** `URLSession` delivers callbacks on its own serial queue, but
+/// `cancel()` is called from the *stream consumer's* thread when the task is
+/// cancelled. So the mutable state is behind a lock rather than relying on the
+/// delegate queue's serialisation (the previous `@unchecked Sendable`
+/// justification was wrong on exactly that point).
 final class DownloadJob: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
     private let from: URL
     private let into: URL
     private let partial: URL
     private let continuation: AsyncThrowingStream<ModelDownloader.Progress, Error>.Continuation
+    private let lock = NSLock()
     private var session: URLSession?
     private var task: URLSessionTask?
     private var didFinish = false
 
-    init(from: URL, into: URL,
-          continuation: AsyncThrowingStream<ModelDownloader.Progress, Error>.Continuation) {
+    init(
+        from: URL, into: URL,
+        continuation: AsyncThrowingStream<ModelDownloader.Progress, Error>.Continuation
+    ) {
         self.from = from
         self.into = into
         self.partial = into.appendingPathExtension("partial")
         self.continuation = continuation
         super.init()
-       }
+    }
 
-         /// A `@Sendable` closure the stream's `onTermination` can capture without
-         /// tripping concurrency checks; it calls back into `cancel()`.
+    /// A `@Sendable` closure the stream's `onTermination` can capture without
+    /// tripping concurrency checks; it calls back into `cancel()`.
     func canceller() -> @Sendable () -> Void {
-         { [weak self] in self?.cancel() }
-        }
+        { [weak self] in self?.cancel() }
+    }
 
     func start() {
-         _ = try? FileManager.default.removeItem(at: partial)
+        _ = try? FileManager.default.removeItem(at: partial)
         let config = URLSessionConfiguration.default
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        self.session = session
         let task = session.downloadTask(with: from)
+        lock.lock()
+        self.session = session
         self.task = task
+        lock.unlock()
         task.resume()
-        }
+    }
 
     func cancel() {
+        lock.lock()
+        let task = self.task
+        let session = self.session
+        lock.unlock()
         task?.cancel()
         session?.invalidateAndCancel()
-        }
+    }
 
-     // MARK: delegate
+    // MARK: delegate
 
-      func urlSession(_ session: URLSession,
-                       downloadTask: URLSessionDownloadTask,
-                       didWriteData bytesWritten: Int64,
-                       totalBytesWritten: Int64,
-                       totalBytesExpectedToWrite: Int64) {
-        continuation.yield(ModelDownloader.Progress(
-            bytesReceived: totalBytesWritten,
-                       totalBytes: totalBytesExpectedToWrite))
-         }
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        continuation.yield(
+            ModelDownloader.Progress(
+                bytesReceived: totalBytesWritten,
+                totalBytes: totalBytesExpectedToWrite))
+    }
 
-       // Move the OS-owned temp file into our managed `.partial` sidecar.
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
+    // Move the OS-owned temp file into our managed `.partial` sidecar.
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // A non-2xx answer still produces a "finished" download whose body is
+        // an error page; that must never become a model.
         do {
-           try FileManager.default.createDirectory(
-              at: partial.deletingLastPathComponent(),
-              withIntermediateDirectories: true)
+            try ModelDownloader.validate(response: downloadTask.response)
+            try FileManager.default.createDirectory(
+                at: partial.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: location, to: partial)
-           } catch {
+        } catch {
             finish(.failure(error))
-             }
         }
+    }
 
-      func urlSession(_ session: URLSession,
-                      task: URLSessionTask,
-                     didCompleteWithError error: Error?) {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
         if let error {
-              // A user Stop / quit surfaces as `.cancelled`; prune, don't alarm.
+            // A user Stop / quit is *not* success: the caller has to be able to
+            // tell "cancelled" from "installed", or the UI announces a model
+            // that was never written.
             if case URLError.cancelled = error {
-              finish(.success(()))
-               return
-              }
+                finish(.failure(CancellationError()))
+                return
+            }
             finish(.failure(error))
-             return
-             }
-          // Success: atomically rename the sidecar to the final path.
-        do {
-           try FileManager.default.moveItem(at: partial, to: into)
-            finish(.success(()))
-            } catch {
-             finish(.failure(error))
-             }
+            return
         }
+        // Success: atomically rename the sidecar to the final path.
+        do {
+            try FileManager.default.moveItem(at: partial, to: into)
+            finish(.success(()))
+        } catch {
+            finish(.failure(error))
+        }
+    }
 
-      private func finish(_ result: Result<Void, Error>) {
-        guard !didFinish else { return }
+    private func finish(_ result: Result<Void, Error>) {
+        lock.lock()
+        if didFinish {
+            lock.unlock()
+            return
+        }
         didFinish = true
+        lock.unlock()
+
         switch result {
         case .success:
-             // On success the sidecar was already renamed away; this is a no-op.
+            // On success the sidecar was already renamed away; this is a no-op.
             _ = try? FileManager.default.removeItem(at: partial)
             continuation.finish()
         case .failure(let error):
-             // A failed/cancelled run must not leave a `.partial` behind.
+            // A failed/cancelled run must not leave a `.partial` behind.
             _ = try? FileManager.default.removeItem(at: partial)
             continuation.finish(throwing: error)
-          }
         }
+    }
 }

@@ -56,6 +56,13 @@ jobs:
             echo "::error::Force-unwrap found in Core."; exit 1
           fi
 
+      - name: Formatting (swift-format)
+        # Whitespace is not a matter of taste here: unchecked formatting drift is
+        # what made the previous large diffs unreviewable.
+        run: |
+          xcrun swift-format lint --recursive --strict \
+            --configuration .swift-format Sources App Tests Package.swift
+
   lint:
     runs-on: macos-latest
     steps:
@@ -85,3 +92,9 @@ jobs:
             echo "::error::The CLI version ($CLI_VERSION) and VERSION ($FILE_VERSION) differ."
             exit 1
           fi
+
+      - name: The model catalog still matches the server
+        # The downloader only verifies a checksum when the catalog entry carries
+        # one, so a stale or missing value silently disables the integrity check.
+        # HEAD requests only — nothing is downloaded.
+        run: ./scripts/verify-catalog.sh

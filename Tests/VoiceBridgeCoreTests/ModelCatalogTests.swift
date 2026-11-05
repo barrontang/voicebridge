@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the model catalog and the download controller.
@@ -9,8 +10,9 @@ final class ModelCatalogTests: XCTestCase {
 
     func testCatalogCoversEveryWhisperModel() {
         for model in SttModel.allCases {
-            XCTAssertNotNil(ModelCatalog.model(for: model),
-                            "the catalog should offer \(model.rawValue)")
+            XCTAssertNotNil(
+                ModelCatalog.model(for: model),
+                "the catalog should offer \(model.rawValue)")
         }
     }
 
@@ -18,8 +20,9 @@ final class ModelCatalogTests: XCTestCase {
         for model in ModelCatalog.all {
             XCTAssertFalse(model.id.isEmpty)
             XCTAssertFalse(model.displayName.isEmpty)
-            XCTAssertTrue(model.remoteURL.scheme == "https",
-                          "\(model.id) must be fetched over https")
+            XCTAssertTrue(
+                model.remoteURL.scheme == "https",
+                "\(model.id) must be fetched over https")
             XCTAssertFalse(model.fileName.isEmpty)
             XCTAssertFalse(model.relativeDirectory.isEmpty)
         }
@@ -27,10 +30,53 @@ final class ModelCatalogTests: XCTestCase {
 
     func testPiperVoicesCarryTheirConfig() {
         for voice in ModelCatalog.tts {
-            XCTAssertEqual(voice.companions.count, 1,
-                           "\(voice.id) needs its .onnx.json next to the model")
+            XCTAssertEqual(
+                voice.companions.count, 1,
+                "\(voice.id) needs its .onnx.json next to the model")
             XCTAssertTrue(voice.companions[0].fileName.hasSuffix(".onnx.json"))
         }
+    }
+
+    /// Every entry must carry a real checksum and size.
+    ///
+    /// A `nil` checksum silently disabled the integrity check in
+    /// `ModelDownloadController` — the plumbing was there, the data was not, so
+    /// a truncated or substituted file installed "successfully". A stale
+    /// `byteSize` is the same class of rot (the old `base` entry was off by 2×).
+    func testEveryCatalogEntryCarriesAChecksumAndSize() {
+        for model in ModelCatalog.all {
+            let sha = model.sha256 ?? ""
+            XCTAssertEqual(sha.count, 64, "\(model.id) must carry a SHA-256")
+            XCTAssertTrue(
+                sha.allSatisfy { $0.isHexDigit },
+                "\(model.id) checksum is not hex")
+            XCTAssertGreaterThan(model.byteSize, 0, "\(model.id) must carry a real byte size")
+        }
+    }
+
+    /// A non-200 answer must fail the download, not become an installed model.
+    ///
+    /// `URLSession` reports 404 and 500 as *successful* transfers, so without
+    /// this check the error page is renamed to `ggml-*.bin`.
+    func testANon200ResponseIsRejected() {
+        let url = URL(string: "https://example.com/ggml-large-v3-turbo.bin")!
+        let ok = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+        XCTAssertNoThrow(try ModelDownloader.validate(response: ok))
+
+        for status in [404, 403, 500] {
+            let bad = HTTPURLResponse(
+                url: url, statusCode: status, httpVersion: nil, headerFields: nil)
+            XCTAssertThrowsError(try ModelDownloader.validate(response: bad), "HTTP \(status)") {
+                error in
+                guard case VoiceError.downloadFailed(_, let reason) = error else {
+                    return XCTFail("expected .downloadFailed, got \(error)")
+                }
+                XCTAssertTrue(reason.contains("\(status)"), reason)
+            }
+        }
+
+        // A non-HTTP response (or none at all) is not a status failure.
+        XCTAssertNoThrow(try ModelDownloader.validate(response: nil))
     }
 
     func testDestinationLivesUnderTheModelRoot() {
@@ -80,13 +126,19 @@ final class ModelCatalogTests: XCTestCase {
         let downloader = ModelDownloader()
         var lastProgress: ModelDownloader.Progress?
         for try await progress in await downloader.download(
-            URL(string: "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json")!,
-            to: destination) {
+            URL(
+                string:
+                    "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+            )!,
+            to: destination)
+        {
             lastProgress = progress
         }
         XCTAssertNotNil(lastProgress)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
-        let size = (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int) ?? 0
-        XCTAssertGreaterThan(size ?? 0, 0)
+        let size =
+            (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int)
+            ?? 0
+        XCTAssertGreaterThan(size, 0)
     }
 }

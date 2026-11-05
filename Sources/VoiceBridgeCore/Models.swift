@@ -21,12 +21,12 @@ public enum SttModel: String, CaseIterable, Codable, Sendable {
     /// Human readable label for UI pickers.
     public var label: String {
         switch self {
-        case .tiny:         return "Tiny · fastest, low accuracy"
-        case .base:         return "Base · ultra-fast, low accuracy"
-        case .small:        return "Small · fast dictation"
-        case .medium:       return "Medium · balanced accuracy"
+        case .tiny: return "Tiny · fastest, low accuracy"
+        case .base: return "Base · ultra-fast, low accuracy"
+        case .small: return "Small · fast dictation"
+        case .medium: return "Medium · balanced accuracy"
         case .largeV3Turbo: return "Large-v3-turbo · best speed/accuracy (RECOMMENDED)"
-        case .largeV3:      return "Large-v3 · maximum accuracy, slower"
+        case .largeV3: return "Large-v3 · maximum accuracy, slower"
         }
     }
 
@@ -42,7 +42,7 @@ public struct Transcription: Sendable, Equatable {
     public let language: String
     public let model: SttModel
     public let durationSeconds: Double
-    public let realtimeFactor: Double   // wallclock / audio length; <1 means faster
+    public let realtimeFactor: Double  // wallclock / audio length; <1 means faster
     /// Per-segment transcript with its time range inside the audio file.
     /// Empty when the engine produced no usable timings (older whisper builds).
     public let segments: [WhisperTranscriptParser.TimedSegment]
@@ -87,6 +87,9 @@ public enum VoiceError: LocalizedError, Sendable {
     // client library). The reason is a short, actionable line - not the
     // child's 60-line stack trace.
     case onlineServiceRejected(engine: String, reason: String)
+    // A model download failed for a reason worth showing verbatim: a non-200
+    // answer, a redirect to an HTML error page, a moved file.
+    case downloadFailed(url: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -116,6 +119,8 @@ public enum VoiceError: LocalizedError, Sendable {
                 + "expected \(expected), got \(actual). The file was discarded."
         case .onlineServiceRejected(let engine, let reason):
             return "\(engine) could not reach its speech service: \(reason)"
+        case .downloadFailed(let url, let reason):
+            return "Could not download \(url): \(reason)"
         }
     }
 }
@@ -147,7 +152,7 @@ public struct SttModelDescriptor: Sendable, Codable, Hashable, Identifiable {
     public enum Origin: Sendable, Codable, Hashable {
         case bundled
         case huggingFace(repo: String, file: String)
-        case imported(bookmark: Data)        // security-scoped
+        case imported(bookmark: Data)  // security-scoped
         case userPath(String)
     }
 
@@ -165,13 +170,15 @@ public struct SttModelDescriptor: Sendable, Codable, Hashable, Identifiable {
     /// Languages this model is good at; empty = multilingual/unknown.
     public let languageHints: [String]
 
-    public init(id: String,
-                displayName: String,
-                fileName: String,
-                quantization: String? = nil,
-                sizeBytes: Int64 = 0,
-                origin: Origin,
-                languageHints: [String] = []) {
+    public init(
+        id: String,
+        displayName: String,
+        fileName: String,
+        quantization: String? = nil,
+        sizeBytes: Int64 = 0,
+        origin: Origin,
+        languageHints: [String] = []
+    ) {
         self.id = id
         self.displayName = displayName
         self.fileName = fileName
@@ -192,38 +199,46 @@ public enum SttModelCatalog {
 
     /// The bundled catalog, best-first (picker order).
     public static let bundled: [SttModelDescriptor] = [
-        SttModelDescriptor(id: "large-v3-turbo",
+        SttModelDescriptor(
+            id: "large-v3-turbo",
             displayName: "Large-v3-turbo · best speed/accuracy (RECOMMENDED)",
             fileName: "ggml-large-v3-turbo.bin",
             quantization: "f16",
             sizeBytes: 1_752_944_432,
             origin: .bundled,
-            languageHints: ["en","fr","de","es","it","pt","nl","zh","ja","ko","ru","ar","hi"]),
-        SttModelDescriptor(id: "large-v3",
+            languageHints: [
+                "en", "fr", "de", "es", "it", "pt", "nl", "zh", "ja", "ko", "ru", "ar", "hi",
+            ]),
+        SttModelDescriptor(
+            id: "large-v3",
             displayName: "Large-v3 · maximum accuracy, slower",
             fileName: "ggml-large-v3.bin",
             quantization: "f16",
             sizeBytes: 3_087_659_584,
             origin: .bundled),
-        SttModelDescriptor(id: "medium",
+        SttModelDescriptor(
+            id: "medium",
             displayName: "Medium · balanced accuracy",
             fileName: "ggml-medium.bin",
             quantization: "f16",
             sizeBytes: 1_516_533_520,
             origin: .bundled),
-        SttModelDescriptor(id: "small",
+        SttModelDescriptor(
+            id: "small",
             displayName: "Small · fast dictation",
             fileName: "ggml-small.bin",
             quantization: "f16",
             sizeBytes: 485_557_560,
             origin: .bundled),
-        SttModelDescriptor(id: "base",
+        SttModelDescriptor(
+            id: "base",
             displayName: "Base · ultra-fast, low accuracy",
             fileName: "ggml-base.bin",
             quantization: "f16",
             sizeBytes: 75_520_216,
             origin: .bundled),
-        SttModelDescriptor(id: "tiny",
+        SttModelDescriptor(
+            id: "tiny",
             displayName: "Tiny · fastest, low accuracy",
             fileName: "ggml-tiny.bin",
             quantization: "f16",
@@ -234,12 +249,12 @@ public enum SttModelCatalog {
     /// The descriptor matching a legacy enum, or nil.
     public static func descriptor(for model: SttModel) -> SttModelDescriptor? {
         switch model {
-        case .tiny:         return bundled.first { $0.id == "tiny" }
-        case .base:         return bundled.first { $0.id == "base" }
-        case .small:        return bundled.first { $0.id == "small" }
-        case .medium:       return bundled.first { $0.id == "medium" }
+        case .tiny: return bundled.first { $0.id == "tiny" }
+        case .base: return bundled.first { $0.id == "base" }
+        case .small: return bundled.first { $0.id == "small" }
+        case .medium: return bundled.first { $0.id == "medium" }
         case .largeV3Turbo: return bundled.first { $0.id == "large-v3-turbo" }
-        case .largeV3:      return bundled.first { $0.id == "large-v3" }
+        case .largeV3: return bundled.first { $0.id == "large-v3" }
         }
     }
 }

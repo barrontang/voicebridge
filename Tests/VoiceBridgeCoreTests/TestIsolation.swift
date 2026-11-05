@@ -1,5 +1,6 @@
-import XCTest
 import Foundation
+import XCTest
+
 @testable import VoiceBridgeCore
 
 /// The settings file can be redirected with `VOICEBRIDGE_CONFIG_PATH`.
@@ -43,6 +44,12 @@ final class SettingsIsolationTests: XCTestCase {
 
         let data = try Data(contentsOf: target)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        XCTAssertEqual(json?["mode"] as? String, "Kokoro-82M (local)")
+        // The file stores the *slug*, not the label: it is an on-disk contract,
+        // so re-wording the picker must never rewrite (or reset) a user's
+        // engine choice.
+        XCTAssertEqual(json?["mode"] as? String, "kokoro")
+
+        // …and the label an older build wrote still loads as the same engine.
+        XCTAssertEqual(TTSMode(identifier: "Kokoro-82M (local)"), .kokoro)
     }
 }

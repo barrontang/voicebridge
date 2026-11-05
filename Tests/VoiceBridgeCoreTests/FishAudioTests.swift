@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import VoiceBridgeCore
 
 /// Tests for the Fish Audio Drama 3 engine (a served, multi-speaker TTS
@@ -8,10 +9,11 @@ final class FishAudioTests: XCTestCase {
     // MARK: - Configuration
 
     func testTheEngineNeedsAServer() {
-        XCTAssertNil(FishAudioBackend.fromEnvironment([:]),
-                      "without a server the engine is not configured")
+        XCTAssertNil(
+            FishAudioBackend.fromEnvironment([:]),
+            "without a server the engine is not configured")
         let backend = FishAudioBackend.fromEnvironment([
-            "VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000",
+            "VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000"
         ])
         XCTAssertNotNil(backend)
         XCTAssertEqual(backend?.baseURL.absoluteString, "http://127.0.0.1:8000")
@@ -22,7 +24,7 @@ final class FishAudioTests: XCTestCase {
 
     func testATrailingSlashIsTrimmed() {
         let backend = FishAudioBackend.fromEnvironment([
-            "VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000/",
+            "VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000/"
         ])
         XCTAssertEqual(backend?.baseURL.absoluteString, "http://127.0.0.1:8000")
     }
@@ -40,9 +42,10 @@ final class FishAudioTests: XCTestCase {
     // MARK: - The request
 
     func testTheRequestCarriesTheText() throws {
-        let body = try FishAudioBackend.requestBody(text: "Hello there.",
-                                                   referencePath: nil,
-                                                   referenceText: nil)
+        let body = try FishAudioBackend.requestBody(
+            text: "Hello there.",
+            referencePath: nil,
+            referenceText: nil)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         XCTAssertEqual(json?["input"] as? String, "Hello there.")
         // `text` is what the Drama 3 examples use; `input` is the
@@ -53,9 +56,10 @@ final class FishAudioTests: XCTestCase {
     }
 
     func testTheRequestCarriesTheReferenceForCloning() throws {
-        let body = try FishAudioBackend.requestBody(text: "Cloned.",
-                                                   referencePath: "/tmp/ref.wav",
-                                                   referenceText: "the reference transcript")
+        let body = try FishAudioBackend.requestBody(
+            text: "Cloned.",
+            referencePath: "/tmp/ref.wav",
+            referenceText: "the reference transcript")
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let references = json?["references"] as? [[String: Any]]
         XCTAssertEqual(references?.count, 1)
@@ -67,10 +71,11 @@ final class FishAudioTests: XCTestCase {
     }
 
     func testTheRequestNamesTheModelWhenOneIsConfigured() throws {
-        let body = try FishAudioBackend.requestBody(text: "Hi.",
-                                                   modelID: "mlx-community/fish-audio-drama-3-4bit",
-                                                   referencePath: nil,
-                                                   referenceText: nil)
+        let body = try FishAudioBackend.requestBody(
+            text: "Hi.",
+            modelID: "mlx-community/fish-audio-drama-3-4bit",
+            referencePath: nil,
+            referenceText: nil)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         XCTAssertEqual(json?["model"] as? String, "mlx-community/fish-audio-drama-3-4bit")
     }
@@ -97,9 +102,10 @@ final class FishAudioTests: XCTestCase {
     }
 
     func testTheRequestOmitsAnEmptyReference() throws {
-        let body = try FishAudioBackend.requestBody(text: "Hi.",
-                                                   referencePath: "",
-                                                   referenceText: nil)
+        let body = try FishAudioBackend.requestBody(
+            text: "Hi.",
+            referencePath: "",
+            referenceText: nil)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         XCTAssertNil(json?["references"])
     }
@@ -116,8 +122,9 @@ final class FishAudioTests: XCTestCase {
         XCTAssertEqual(backend?.baseURL.absoluteString, FishAudioBackend.defaultLocalURL)
         XCTAssertTrue(backend?.isLocal == true)
         // The server gets a path, not a repo id: it loads from disk, offline.
-        XCTAssertEqual(backend?.modelID,
-                       FishAudioBackend.localModelDirectory(root: root).path)
+        XCTAssertEqual(
+            backend?.modelID,
+            FishAudioBackend.localModelDirectory(root: root).path)
         // A local server keeps the text on this Mac, so no consent sheet.
         XCTAssertFalse(backend?.requiresNetwork == true)
         XCTAssertTrue(backend?.displayName.contains("local") == true)
@@ -156,13 +163,16 @@ final class FishAudioTests: XCTestCase {
             ["VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8001"],
             modelRoot: root)
         XCTAssertEqual(backend?.baseURL.port, 8001)
-        XCTAssertEqual(backend?.modelID,
-                       FishAudioBackend.localModelDirectory(root: root).path)
+        XCTAssertEqual(
+            backend?.modelID,
+            FishAudioBackend.localModelDirectory(root: root).path)
     }
 
     func testTheModelCanBeOverriddenForALocalServer() {
-        let env = ["VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000",
-                   "VOICEBRIDGE_FISH_MODEL": "mlx-community/fish-audio-drama-3-8bit"]
+        let env = [
+            "VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000",
+            "VOICEBRIDGE_FISH_MODEL": "mlx-community/fish-audio-drama-3-8bit",
+        ]
         let backend = FishAudioBackend.fromEnvironment(env)
         XCTAssertEqual(backend?.modelID, "mlx-community/fish-audio-drama-3-8bit")
     }
@@ -192,20 +202,80 @@ final class FishAudioTests: XCTestCase {
 
     // MARK: - The mode
 
-    func testFishAudioIsAnOnlineEngine() {
-        XCTAssertTrue(TTSMode.fishAudio.isOnline)
-        XCTAssertTrue(TTSMode.edgeTTS.isOnline)
-        XCTAssertFalse(TTSMode.piper.isOnline)
-        XCTAssertFalse(TTSMode.kokoro.isOnline)
-        XCTAssertFalse(TTSMode.system.isOnline)
+    /// The one privacy answer, for every engine.
+    ///
+    /// Edge is always online. A served engine is online only when its server is
+    /// not on this Mac — the disagreement between `TTSMode.isOnline` and
+    /// `selectedEngineIsRemote` that this replaced is what let a local Drama 3
+    /// server demand consent it did not need, and let a remote one slip through
+    /// the CLI with no warning at all.
+    func testWhichEnginesTransmitText() {
+        let root = URL(fileURLWithPath: "/tmp/vb-engine-privacy")
+        let env: [String: String] = [:]
+
+        XCTAssertTrue(
+            EnginePrivacy.requiresNetwork(mode: .edgeTTS, modelRoot: root, environment: env))
+        XCTAssertFalse(
+            EnginePrivacy.requiresNetwork(mode: .piper, modelRoot: root, environment: env))
+        XCTAssertFalse(
+            EnginePrivacy.requiresNetwork(mode: .kokoro, modelRoot: root, environment: env))
+        XCTAssertFalse(
+            EnginePrivacy.requiresNetwork(mode: .system, modelRoot: root, environment: env))
+
+        // No server configured: nothing is transmitted (the manager falls back).
+        XCTAssertFalse(
+            EnginePrivacy.requiresNetwork(mode: .fishAudio, modelRoot: root, environment: env))
+
+        // A remote server: online.
+        let remote = ["VOICEBRIDGE_FISH_TTS": "http://gpu-box:8000"]
+        XCTAssertTrue(
+            EnginePrivacy.requiresNetwork(mode: .fishAudio, modelRoot: root, environment: remote))
+
+        // A local server: stays on this Mac.
+        let local = ["VOICEBRIDGE_FISH_TTS": "http://127.0.0.1:8000"]
+        XCTAssertFalse(
+            EnginePrivacy.requiresNetwork(mode: .fishAudio, modelRoot: root, environment: local))
+
+        // Consent copy names the engine that is actually running.
+        XCTAssertNil(EnginePrivacy.consentMessage(for: .piper, modelRoot: root, environment: env))
+        XCTAssertEqual(
+            EnginePrivacy.consentMessage(for: .edgeTTS, modelRoot: root, environment: env)?
+                .contains("Microsoft") ?? false,
+            true)
+        XCTAssertEqual(
+            EnginePrivacy.consentMessage(for: .fishAudio, modelRoot: root, environment: remote)?
+                .contains("Fish Audio") ?? false,
+            true)
+    }
+
+    /// The slug migration must not lose an existing user's engine choice.
+    func testLegacyEngineLabelsStillDecode() {
+        XCTAssertEqual(TTSMode(identifier: "Piper (local, DEFAULT)"), .piper)
+        XCTAssertEqual(TTSMode(identifier: "Built-in (offline)"), .system)
+        XCTAssertEqual(TTSMode(identifier: "Edge TTS (online)"), .edgeTTS)
+        XCTAssertEqual(TTSMode(identifier: "Fish Audio (Drama 3)"), .fishAudio)
+        XCTAssertEqual(TTSMode(identifier: "Kokoro-82M (local)"), .kokoro)
+        // ...and the current slugs and CLI aliases.
+        XCTAssertEqual(TTSMode(identifier: "edge-tts"), .edgeTTS)
+        XCTAssertEqual(TTSMode(identifier: "edge"), .edgeTTS)
+        XCTAssertEqual(TTSMode(identifier: "fish"), .fishAudio)
+        XCTAssertNil(TTSMode(identifier: "Something Else"))
+
+        // Round-trip through JSON, as config.json does.
+        struct Cfg: Codable { let mode: TTSMode }
+        let legacy = Data(#"{"mode":"Piper (local, DEFAULT)"}"#.utf8)
+        let decoded = try? JSONDecoder().decode(Cfg.self, from: legacy)
+        XCTAssertEqual(decoded?.mode, .piper)
+        let encoded = try? JSONEncoder().encode(Cfg(mode: .edgeTTS))
+        XCTAssertEqual(String(data: encoded ?? Data(), encoding: .utf8), #"{"mode":"edge-tts"}"#)
     }
 
     /// A settings file written by a newer build (an engine this build does
     /// not know) must not wipe the user's configuration.
     func testAnUnknownEngineInTheSettingsFallsBackInsteadOfFailing() throws {
         let json = """
-        { "schemaVersion": 99, "mode": "Some Future Engine" }
-        """
+            { "schemaVersion": 99, "mode": "Some Future Engine" }
+            """
         struct Cfg: Decodable { let mode: TTSMode? }
         let cfg = try JSONDecoder().decode(Cfg.self, from: Data(json.utf8))
         XCTAssertEqual(cfg.mode, .piper, "an unknown engine must not break the config")

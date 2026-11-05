@@ -9,8 +9,8 @@ import Foundation
 public struct DownloadableModel: Identifiable, Sendable, Equatable {
 
     public enum Kind: String, Sendable {
-        case stt   // a whisper.cpp ggml model
-        case tts   // a Piper voice
+        case stt  // a whisper.cpp ggml model
+        case tts  // a Piper voice
     }
 
     /// A file that must be fetched next to the model (e.g. Piper's
@@ -22,7 +22,7 @@ public struct DownloadableModel: Identifiable, Sendable, Equatable {
         public init(fileName: String, remoteURL: URL) {
             self.fileName = fileName
             self.remoteURL = remoteURL
-            }
+        }
     }
 
     public let id: String
@@ -40,15 +40,17 @@ public struct DownloadableModel: Identifiable, Sendable, Equatable {
     /// Extra files fetched alongside the model.
     public let companions: [Companion]
 
-    public init(id: String,
-                displayName: String,
-                kind: Kind,
-                fileName: String,
-                relativeDirectory: String,
-                remoteURL: URL,
-                byteSize: Int64 = 0,
-                sha256: String? = nil,
-                companions: [Companion] = []) {
+    public init(
+        id: String,
+        displayName: String,
+        kind: Kind,
+        fileName: String,
+        relativeDirectory: String,
+        remoteURL: URL,
+        byteSize: Int64 = 0,
+        sha256: String? = nil,
+        companions: [Companion] = []
+    ) {
         self.id = id
         self.displayName = displayName
         self.kind = kind
@@ -58,7 +60,7 @@ public struct DownloadableModel: Identifiable, Sendable, Equatable {
         self.byteSize = byteSize
         self.sha256 = sha256
         self.companions = companions
-        }
+    }
 
     /// The destination inside a model root.
     public func destination(in root: ModelPaths) -> URL {
@@ -73,17 +75,23 @@ public enum ModelCatalog {
     private static let whisperBase = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
     private static let piperBase = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
-       /// A URL built from a literal. A malformed literal is a programming
-       /// error (not a runtime condition), so it traps instead of silently
-       /// producing an unusable URL.
+    /// A URL built from a literal. A malformed literal is a programming
+    /// error (not a runtime condition), so it traps instead of silently
+    /// producing an unusable URL.
     private static func url(_ string: String) -> URL {
         guard let parsed = URL(string: string) else {
             preconditionFailure("VoiceBridge: malformed URL in the model catalog: \(string)")
-            }
-        return parsed
         }
+        return parsed
+    }
 
     /// whisper.cpp speech-to-text models.
+    ///
+    /// `byteSize` and `sha256` are the *real* values for the files served today;
+    /// `scripts/verify-catalog.sh` re-checks both against the server in CI, so a
+    /// moved or re-uploaded file fails the build instead of a user's install.
+    /// Every entry must carry a checksum — `ModelDownloadCatalogTests` enforces
+    /// it, because a nil checksum silently disables the integrity check.
     public static let stt: [DownloadableModel] = [
         DownloadableModel(
             id: "large-v3-turbo",
@@ -92,7 +100,8 @@ public enum ModelCatalog {
             fileName: "ggml-large-v3-turbo.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-large-v3-turbo.bin"),
-            byteSize: 1_752_944_432),
+            byteSize: 1_624_555_275,
+            sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
         DownloadableModel(
             id: "large-v3",
             displayName: "Large-v3 · maximum accuracy, slower",
@@ -100,7 +109,8 @@ public enum ModelCatalog {
             fileName: "ggml-large-v3.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-large-v3.bin"),
-            byteSize: 3_087_659_584),
+            byteSize: 3_095_033_483,
+            sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"),
         DownloadableModel(
             id: "medium",
             displayName: "Medium · balanced accuracy",
@@ -108,7 +118,8 @@ public enum ModelCatalog {
             fileName: "ggml-medium.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-medium.bin"),
-            byteSize: 1_516_533_520),
+            byteSize: 1_533_763_059,
+            sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"),
         DownloadableModel(
             id: "small",
             displayName: "Small · fast dictation",
@@ -116,7 +127,8 @@ public enum ModelCatalog {
             fileName: "ggml-small.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-small.bin"),
-            byteSize: 485_557_560),
+            byteSize: 487_601_967,
+            sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"),
         DownloadableModel(
             id: "base",
             displayName: "Base · ultra-fast, low accuracy",
@@ -124,7 +136,8 @@ public enum ModelCatalog {
             fileName: "ggml-base.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-base.bin"),
-            byteSize: 75_520_216),
+            byteSize: 147_951_465,
+            sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
         DownloadableModel(
             id: "tiny",
             displayName: "Tiny · fastest, low accuracy",
@@ -132,7 +145,8 @@ public enum ModelCatalog {
             fileName: "ggml-tiny.bin",
             relativeDirectory: "whisper",
             remoteURL: url("\(whisperBase)/ggml-tiny.bin"),
-            byteSize: 75_243_368),
+            byteSize: 77_691_713,
+            sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
     ]
 
     /// Piper text-to-speech voices.
@@ -147,11 +161,13 @@ public enum ModelCatalog {
             fileName: "en_US-lessac-medium.onnx",
             relativeDirectory: "piper/voice",
             remoteURL: url("\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx"),
-            byteSize: 63_214_376,
+            byteSize: 63_201_294,
+            sha256: "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
             companions: [
                 DownloadableModel.Companion(
                     fileName: "en_US-lessac-medium.onnx.json",
-                    remoteURL: url("\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"))
+                    remoteURL: url(
+                        "\(piperBase)/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"))
             ]),
         DownloadableModel(
             id: "en_US-amy-medium",
@@ -160,7 +176,8 @@ public enum ModelCatalog {
             fileName: "en_US-amy-medium.onnx",
             relativeDirectory: "piper/voice",
             remoteURL: url("\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx"),
-            byteSize: 63_213_112,
+            byteSize: 63_201_294,
+            sha256: "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18",
             companions: [
                 DownloadableModel.Companion(
                     fileName: "en_US-amy-medium.onnx.json",
@@ -173,11 +190,13 @@ public enum ModelCatalog {
             fileName: "zh_CN-huayan-medium.onnx",
             relativeDirectory: "piper/voice",
             remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx"),
-            byteSize: 63_212_888,
+            byteSize: 63_201_294,
+            sha256: "9929917bf8cabb26fd528ea44d3a6699c11e87317a14765312420be230be0f3d",
             companions: [
                 DownloadableModel.Companion(
                     fileName: "zh_CN-huayan-medium.onnx.json",
-                    remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json"))
+                    remoteURL: url(
+                        "\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json"))
             ]),
     ]
 

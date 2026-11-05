@@ -7,11 +7,11 @@ public struct UtteranceSegmenter: Sendable {
 
     public struct Config: Sendable {
         public var speechThreshold: Float = 0.012
-        public var silenceThreshold: Float = 0.006       // hysteresis low-water
+        public var silenceThreshold: Float = 0.006  // hysteresis low-water
         public var trailingSilence: TimeInterval = 0.6
         public var minimumUtterance: TimeInterval = 0.25
-        public var maximumUtterance: TimeInterval = 15.0   // force-chunk monologues
-        public var leadIn: TimeInterval = 0.20             // pre-roll for context
+        public var maximumUtterance: TimeInterval = 15.0  // force-chunk monologues
+        public var leadIn: TimeInterval = 0.20  // pre-roll for context
 
         public init() {}
     }
@@ -34,7 +34,17 @@ public struct UtteranceSegmenter: Sendable {
     /// covers the *whole* sentence rather than an arbitrary window.
     public private(set) var currentUtteranceStart: TimeInterval?
 
-    private enum State { case idle; case speaking(start: TimeInterval) }
+    private enum State {
+        case idle
+        case speaking(start: TimeInterval)
+    }
+
+    /// Set when the previous utterance was cut by `maximumUtterance` rather than
+    /// by silence. The next utterance then starts *exactly* at the current frame
+    /// instead of re-adding `leadIn` — that pre-roll is audio the previous
+    /// utterance already transcribed, and re-feeding it produced a duplicated
+    /// (or, once the watermark dropped it, a swallowed) word at every 15 s seam.
+    private var reopenWithoutLeadIn = false
 
     public init(config: Config = Config()) { self.config = config }
 
@@ -45,7 +55,11 @@ public struct UtteranceSegmenter: Sendable {
         switch state {
         case .idle:
             if rms >= config.speechThreshold {
-                let start = max(0, frame.startTime - config.leadIn)
+                let start =
+                    reopenWithoutLeadIn
+                    ? frame.startTime
+                    : max(0, frame.startTime - config.leadIn)
+                reopenWithoutLeadIn = false
                 state = .speaking(start: start)
                 silenceAccum = 0
                 currentUtteranceID = UUID()
@@ -54,12 +68,15 @@ public struct UtteranceSegmenter: Sendable {
             }
 
         case .speaking(let start):
-            if rms < config.silenceThreshold { silenceAccum += frame.duration }
-            else                               { silenceAccum = 0 }
+            if rms < config.silenceThreshold {
+                silenceAccum += frame.duration
+            } else {
+                silenceAccum = 0
+            }
 
-            let elapsed   = frame.endTime - start
-            let closed    = silenceAccum >= config.trailingSilence
-            let hardCap   = elapsed >= config.maximumUtterance
+            let elapsed = frame.endTime - start
+            let closed = silenceAccum >= config.trailingSilence
+            let hardCap = elapsed >= config.maximumUtterance
 
             if closed || hardCap {
                 let end = frame.endTime - silenceAccum
@@ -67,6 +84,8 @@ public struct UtteranceSegmenter: Sendable {
                 out.append(.ended(range: range))
                 state = .idle
                 silenceAccum = 0
+                // A forced cut (not silence) must not re-feed the pre-roll.
+                reopenWithoutLeadIn = hardCap
                 // Keep currentUtteranceID set until the engine finalises.
             } else {
                 out.append(.continuing)
@@ -81,6 +100,7 @@ public struct UtteranceSegmenter: Sendable {
         state = .idle
         silenceAccum = 0
         currentUtteranceStart = nil
+        reopenWithoutLeadIn = false
         return .ended(range: start..<time)
     }
 

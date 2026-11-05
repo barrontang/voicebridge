@@ -74,23 +74,37 @@ public actor LiveTranscriptEngine {
         guard isRunning else { return }
         isRunning = false
 
-        // Flush a half-spoken utterance.
-        if case .ended(let range) = segmenter.flush(at: ring.endTime) {
-            enqueueFinal(range, utteranceID: segmenter.currentUtteranceID)
-        }
-
         partialTask?.cancel()
         partialTask = nil
-        // Drain finals so the caller sees a clean end.
+
+        // Flush a half-spoken utterance by appending it *directly*. Going
+        // through `enqueueFinal` started a second drain loop, and the two
+        // competed for the same queue: if that loop won, this drain saw an
+        // empty queue, called `finishStream()`, and the last sentence was
+        // dropped — the exact case the flush exists to prevent.
+        if case .ended(let range) = segmenter.flush(at: ring.endTime) {
+            pendingFinals.append((range, segmenter.currentUtteranceID))
+        }
+
+        // Let any already-running final drain finish before ending the stream,
+        // so `.finished` can never overtake the transcript it is waiting for.
+        if let finalTask {
+            await finalTask.value
+            self.finalTask = nil
+        }
+
         await drainFinals()
         finishStream()
     }
 
     private func shutdown() {
-        partialTask?.cancel(); partialTask = nil
-        finalTask?.cancel();   finalTask = nil
+        partialTask?.cancel()
+        partialTask = nil
+        finalTask?.cancel()
+        finalTask = nil
         pendingFinals.removeAll()
-        continuation?.finish(); continuation = nil
+        continuation?.finish()
+        continuation = nil
         isRunning = false
     }
 
@@ -153,11 +167,12 @@ public actor LiveTranscriptEngine {
                     hint: .partial
                 )
                 if Task.isCancelled { return }
-                await self?.apply(segments: segments,
-                                  windowRange: range,
-                                  windowIndex: idx,
-                                  utteranceID: utteranceID,
-                                  isFinal: false)
+                await self?.apply(
+                    segments: segments,
+                    windowRange: range,
+                    windowIndex: idx,
+                    utteranceID: utteranceID,
+                    isFinal: false)
             } catch is CancellationError {
                 // expected
             } catch {
@@ -194,11 +209,12 @@ public actor LiveTranscriptEngine {
                     language: config.language,
                     hint: .final
                 )
-                await apply(segments: segments,
-                           windowRange: range,
-                           windowIndex: idx,
-                           utteranceID: utteranceID,
-                           isFinal: true)
+                await apply(
+                    segments: segments,
+                    windowRange: range,
+                    windowIndex: idx,
+                    utteranceID: utteranceID,
+                    isFinal: true)
             } catch {
                 emitGap(range)
             }

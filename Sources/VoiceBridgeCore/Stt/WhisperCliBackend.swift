@@ -22,95 +22,123 @@ import Foundation
 /// fallback for variant naming), and falls back to parsing stdout when the
 /// binary predates these flags. Audio duration is measured from the source file
 /// (a model's offset can be its 30 s context window, which would skew any ratio).
-    // SAFETY (@unchecked Sendable): all stored properties are immutable `let`s.
-    // A future mutable cache must be an `actor` or locked, not a bare var.
+// SAFETY (@unchecked Sendable): all stored properties are immutable `let`s.
+// A future mutable cache must be an `actor` or locked, not a bare var.
 public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
 
-        /// Model files live under `<root>/whisper/ggml-<model>.bin`.
-     private let modelDirectory: URL
-        /// Single shared binary-discovery implementation (Finding 4).
+    /// Model files live under `<root>/whisper/ggml-<model>.bin`.
+    private let modelDirectory: URL
+    /// Single shared binary-discovery implementation (Finding 4).
     private let binaryLocator: BinaryLocator
+    /// An explicit deadline for one transcription; `nil` derives one from
+    /// the audio length (see `timeout(forAudio:seconds:)`).
+    private let explicitTimeout: TimeInterval?
 
-       /// `paths` defaults to the environment-derived layout; callers that have a
-        /// user-chosen root pass their own so STT scans the *same* folder TTS does
-         /// (Fix for Finding 1 — the old static read ignored the configured root).
-    public init(modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
-                 binaryLocator: BinaryLocator = BinaryLocator()) {
+    /// `paths` defaults to the environment-derived layout; callers that have a
+    /// user-chosen root pass their own so STT scans the *same* folder TTS does
+    /// (Fix for Finding 1 — the old static read ignored the configured root).
+    public init(
+        modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
+        binaryLocator: BinaryLocator = BinaryLocator(),
+        timeout: TimeInterval? = nil
+    ) {
         self.modelDirectory = modelDirectory
         self.binaryLocator = binaryLocator
-        }
+        self.explicitTimeout = timeout
+    }
 
-         /// Absolute path to the model file, or nil (not yet downloaded).
+    /// The deadline for one invocation.
+    ///
+    /// Without one, a wedged `whisper-cli` (Metal contention, a corrupt model)
+    /// never returns: the live path's serial final queue then blocks forever and
+    /// the UI sits on "Transcribing…" with no error. 20× realtime is a generous
+    /// ceiling for the slowest model on the slowest Mac.
+    static func timeout(
+        forAudio seconds: TimeInterval,
+        explicit: TimeInterval?
+    ) -> TimeInterval {
+        if let explicit { return explicit }
+        return max(30, seconds * 20 + 10)
+    }
+
+    /// Absolute path to the model file, or nil (not yet downloaded).
     public func modelURL(for model: SttModel) -> URL? {
         let url = modelDirectory.appendingPathComponent(model.ggmlFilename)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
-          }
+    }
 
-          /// Ensures the model file exists; returns its URL or throws.
-     private func requireModelURL(for model: SttModel) throws -> URL {
+    /// Ensures the model file exists; returns its URL or throws.
+    private func requireModelURL(for model: SttModel) throws -> URL {
         if let url = modelURL(for: model) { return url }
         throw VoiceError.modelMissing(model: model.ggmlFilename, directory: modelDirectory.path)
-          }
+    }
 
-          /// Binary resolution (Finding 4): delegates to the one `BinaryLocator`,
-          /// unifying the discovery that used to be copy-pasted here and in the CLI.
-          /// Precedence:
-          ///     1. env `WHISPER_CLI`
-          ///     2. App-bundle resource `whisper-cli` (when linked into a shipping app)
-          ///     3. Homebrew whisper-cpp prefixes + `$PATH` (the locator's order)
-     private func resolveBinary() throws -> String {
+    /// Binary resolution (Finding 4): delegates to the one `BinaryLocator`,
+    /// unifying the discovery that used to be copy-pasted here and in the CLI.
+    /// Precedence:
+    ///     1. env `WHISPER_CLI`
+    ///     2. App-bundle resource `whisper-cli` (when linked into a shipping app)
+    ///     3. Homebrew whisper-cpp prefixes + `$PATH` (the locator's order)
+    private func resolveBinary() throws -> String {
         let env = ProcessInfo.processInfo.environment
         if let p = env["WHISPER_CLI"], FileManager.default.isExecutableFile(atPath: p) {
             return p
-          }
+        }
         if let bundleURL = Bundle.main.url(forResource: "whisper-cli", withExtension: nil) {
             return bundleURL.path
-          }
-          // 3 + 4 are both handled by the locator's documented search order.
+        }
+        // 3 + 4 are both handled by the locator's documented search order.
         guard let found = binaryLocator.locate("whisper-cli") else {
             throw VoiceError.binaryNotFound(
                 component: "whisper-cli",
                 hint: "Install via `brew install whisper-cpp` or set the WHISPER_CLI env var.")
-              }
+        }
         return found
-          }
+    }
 
-          /// Whether a non-zero exit was caused by an *unrecognized option* (an
-          /// old binary that predates `-otxt`/`-oj`), as opposed to a genuine
-          /// transcription failure that must be re-thrown.
+    /// Whether a non-zero exit was caused by an *unrecognized option* (an
+    /// old binary that predates `-otxt`/`-oj`), as opposed to a genuine
+    /// transcription failure that must be re-thrown.
+    ///
+    /// Matched on `stderr` only: requiring the binary's *path* to contain
+    /// "whisper" rejected the Homebrew name (`/opt/homebrew/bin/main`) and
+    /// turned a retryable option error into a hard failure.
     private func isUnrecognizedOptionError(_ error: VoiceError) -> Bool {
-        guard case .processFailed(let component, _, let stderr) = error,
-             component.lowercased().contains("whisper") else { return false }
+        guard case .processFailed(_, _, let stderr) = error else { return false }
         let s = stderr.lowercased()
         return s.contains("unrecognized")
-                 || s.contains("unknown option")
-                 || s.contains("invalid option")
-                 || s.contains("option not found")
-                 || s.contains("unknown arg")
-          }
+            || s.contains("unknown option")
+            || s.contains("invalid option")
+            || s.contains("option not found")
+            || s.contains("unknown arg")
+    }
 
-          /// Recursively find the first regular file under `dir` with the given
-          /// extension (covers builds that name the output file differently).
-     private func firstFile(at dir: URL, withExtension ext: String) -> String? {
-        guard let entries = try? FileManager.default
-               .contentsOfDirectory(at: dir,
-                                    includingPropertiesForKeys: [.isRegularFileKey],
-                                    options: [.skipsHiddenFiles])
-             else { return nil }
+    /// Find the first regular file under `dir` with the given extension
+    /// (covers builds that name the output file differently).
+    private func firstFile(at dir: URL, withExtension ext: String) -> String? {
+        guard
+            let entries = try? FileManager.default
+                .contentsOfDirectory(
+                    at: dir,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles])
+        else { return nil }
         return entries.first { $0.pathExtension == ext }?.path
-          }
+    }
 
-          /// `<workDir>/<base>.<ext>` — the filename whisper.cpp derives from the
-          /// input basename (it keeps the original extension, e.g.
-          /// `in.wav` → `in.wav.json`).
-     private func derived(_ workDir: URL, base: String, ext: String) -> String {
+    /// `<workDir>/<base>.<ext>` — the filename whisper.cpp derives from the
+    /// input basename (it keeps the original extension, e.g.
+    /// `in.wav` → `in.wav.json`).
+    private func derived(_ workDir: URL, base: String, ext: String) -> String {
         workDir.appendingPathComponent("\(base).\(ext)").path
-          }
+    }
 
-    public func transcribe(audio: URL,
-                           language: String?,
-                           model: SttModel,
-                           useTimestamps: Bool) async throws -> Transcription {
+    public func transcribe(
+        audio: URL,
+        language: String?,
+        model: SttModel,
+        useTimestamps: Bool
+    ) async throws -> Transcription {
         // Missing 2: honour task cancellation — if the caller cancelled, we must
         // not keep a 30-minute transcription running. Shell.run wraps every
         // Process in a cancellation handler, but we short-circuit here so the
@@ -120,93 +148,105 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
         let modelPath = try requireModelURL(for: model)
         let binary = try resolveBinary()
 
-          // Each invocation gets an isolated temp CWD. whisper.cpp derives its
-          // output filenames from the input basename, so we both predict the name
-          // and scan the dir to confirm, rather than trusting one name.
+        // Measured from the source file, once: it drives both the deadline and
+        // the realtime factor below.
+        let measuredDuration = AudioDuration.estimateSeconds(at: audio)
+        let limit = Self.timeout(forAudio: measuredDuration, explicit: explicitTimeout)
+
+        // Each invocation gets an isolated temp CWD. whisper.cpp derives its
+        // output filenames from the input basename, so we both predict the name
+        // and scan the dir to confirm, rather than trusting one name.
         let uuid = UUID().uuidString.lowercased()
         let workDir = URL(fileURLWithPath: NSTemporaryDirectory())
-                          .appendingPathComponent("voicebridge-\(uuid)", isDirectory: true)
-        try FileManager.default.createDirectory(at: workDir,
-                                                withIntermediateDirectories: true)
-        let baseName = audio.lastPathComponent                 // e.g. "in.wav"
+            .appendingPathComponent("voicebridge-\(uuid)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workDir,
+            withIntermediateDirectories: true)
+        // A failed run used to leak its scratch dir in $TMPDIR forever.
+        defer { try? FileManager.default.removeItem(at: workDir) }
+        let baseName = audio.lastPathComponent  // e.g. "in.wav"
 
-          // Common args: model, file, language (nil = auto-detect),
-          // no-timestamps, progress.
+        // Common args: model, file, language (nil = auto-detect),
+        // no-timestamps, progress.
         var baseArgs = ["-m", modelPath.path, "-f", audio.path]
         if let language { baseArgs += ["-l", language] }
-        if !useTimestamps { baseArgs.append("-nt") }           // clean text only
-        baseArgs += ["-pp"]                                     // print progress
+        if !useTimestamps { baseArgs.append("-nt") }  // clean text only
+        baseArgs += ["-pp"]  // print progress
 
         let started = Date()
         var stdout = ""
         do {
-               // Modern attempt: ask for an on-disk transcript + JSON metadata.
+            // Modern attempt: ask for an on-disk transcript + JSON metadata.
             let result = try await Shell.run(
                 at: binary,
                 arguments: baseArgs + ["-otxt", "-oj"],
-                workingDirectory: workDir.path)
+                workingDirectory: workDir.path,
+                timeout: limit)
             stdout = result.stdout
-             } catch let error as VoiceError where isUnrecognizedOptionError(error) {
-                 // The binary predates `-otxt`/`-oj`: it prints the transcript to
-                 // stdout instead. Retry without those flags. We only retry on
-                 // *option-parsing* failures, so genuine transcription errors
-                 // still surface to the caller.
-            let result = try await Shell.run(at: binary, arguments: baseArgs,
-                                             workingDirectory: workDir.path)
+        } catch let error as VoiceError where isUnrecognizedOptionError(error) {
+            // The binary predates `-otxt`/`-oj`: it prints the transcript to
+            // stdout instead. Retry without those flags. We only retry on
+            // *option-parsing* failures, so genuine transcription errors
+            // still surface to the caller.
+            let result = try await Shell.run(
+                at: binary, arguments: baseArgs,
+                workingDirectory: workDir.path,
+                timeout: limit)
             stdout = result.stdout
-             }
+        }
         let elapsed = Date().timeIntervalSince(started)
 
-          // Locate the derived output files. Preference order: predicted
-          // `<base>.<ext>` → any `*.<ext>` found in the work dir.
-        let txtPath = (FileManager.default.fileExists(atPath: derived(workDir, base: baseName, ext: "txt"))
-                  ? derived(workDir, base: baseName, ext: "txt")
-                  : firstFile(at: workDir, withExtension: "txt"))
-        let jsonPath = (FileManager.default.fileExists(atPath: derived(workDir, base: baseName, ext: "json"))
-                  ? derived(workDir, base: baseName, ext: "json")
-                  : firstFile(at: workDir, withExtension: "json"))
+        // Locate the derived output files. Preference order: predicted
+        // `<base>.<ext>` → any `*.<ext>` found in the work dir.
+        let txtPath =
+            (FileManager.default.fileExists(atPath: derived(workDir, base: baseName, ext: "txt"))
+                ? derived(workDir, base: baseName, ext: "txt")
+                : firstFile(at: workDir, withExtension: "txt"))
+        let jsonPath =
+            (FileManager.default.fileExists(atPath: derived(workDir, base: baseName, ext: "json"))
+                ? derived(workDir, base: baseName, ext: "json")
+                : firstFile(at: workDir, withExtension: "json"))
 
-          // Text source priority: on-disk transcript → stdout (old builds).
+        // Text source priority: on-disk transcript → stdout (old builds).
         var text = ""
         if let txtPath {
             text = WhisperTranscriptParser.loadText(atPath: txtPath)
-          }
+        }
         if text.isEmpty {
             text = WhisperTranscriptParser.plainText(from: stdout)
-            }
+        }
 
-          // Detect the spoken language from JSON when available, and keep the
+        // Detect the spoken language from JSON when available, and keep the
         // per-segment timings (they are what makes live, de-duplicated
         // captions possible).
         var detectedLanguage = language ?? "auto"
         var timedSegments: [WhisperTranscriptParser.TimedSegment] = []
         if let jsonPath,
-           let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
-           let meta = WhisperTranscriptParser.parseJSON(data) {
+            let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
+            let meta = WhisperTranscriptParser.parseJSON(data)
+        {
             if !meta.text.isEmpty { text = meta.text }
             if !meta.language.isEmpty { detectedLanguage = meta.language }
             timedSegments = meta.segments
-              }
+        }
 
-          // Prefer a duration measured from the source file: a model's offset can
-          // be its 30 s context window, which would skew the factor. Fall back to
-          // the JSON-derived duration only when the file is unreadable.
-        var durationSeconds = AudioDuration.estimateSeconds(at: audio)
+        // Prefer a duration measured from the source file: a model's offset can
+        // be its 30 s context window, which would skew the factor. Fall back to
+        // the JSON-derived duration only when the file is unreadable.
+        var durationSeconds = measuredDuration
         if durationSeconds <= 0,
-           let jsonPath,
-           let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
-           let meta = WhisperTranscriptParser.parseJSON(data),
-           meta.durationSeconds > 0 {
+            let jsonPath,
+            let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
+            let meta = WhisperTranscriptParser.parseJSON(data),
+            meta.durationSeconds > 0
+        {
             durationSeconds = meta.durationSeconds
-              }
+        }
 
-          // realtimeFactor is wallclock / audio length (~1 == realtime, <1
-          // faster). Only meaningful once we know the true audio duration;
-          // otherwise report the raw wallclock as a cost proxy.
+        // realtimeFactor is wallclock / audio length (~1 == realtime, <1
+        // faster). Only meaningful once we know the true audio duration;
+        // otherwise report the raw wallclock as a cost proxy.
         let realtimeFactor = durationSeconds > 0 ? elapsed / durationSeconds : elapsed
-
-          // Best-effort cleanup of the per-run scratch dir.
-        try? FileManager.default.removeItem(at: workDir)
 
         return Transcription(
             text: text,
@@ -215,5 +255,5 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
             durationSeconds: durationSeconds,
             realtimeFactor: realtimeFactor,
             segments: timedSegments)
-        }
+    }
 }

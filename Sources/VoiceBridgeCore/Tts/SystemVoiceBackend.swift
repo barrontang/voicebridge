@@ -1,5 +1,5 @@
-import Foundation
 import AVFoundation
+import Foundation
 
 /// AVSpeechSynthesizer — built-in, fully-offline macOS voice. No model files,
 /// no network: a true zero-setup baseline and the safety fallback when Piper
@@ -16,15 +16,15 @@ import AVFoundation
 /// the instant `speak(_:)` is called. That makes `play: true` / `play: false`
 /// honest for in-place engines: the caller can await the audio, and a CLI
 /// process no longer exits mid-sentence.
-    // SAFETY (@unchecked Sendable): the stored properties are immutable; the
-    // mutable state (the continuation) is guarded by a lock.
+// SAFETY (@unchecked Sendable): the stored properties are immutable; the
+// mutable state (the continuation) is guarded by a lock.
 public final class SystemVoiceBackend: TTSBackend, @unchecked Sendable {
 
-         /// In-place engine — no audio file is produced.
+    /// In-place engine — no audio file is produced.
     public var producesAudioFile: Bool { false }
     public var displayName: String { "Built-in (AVSpeechSynthesizer)" }
 
-         /// System voices are always available on macOS.
+    /// System voices are always available on macOS.
     public func isAvailable() -> Bool { true }
 
     public func synthesize(text: String, voice: String?, outputPath: URL) async throws -> URL {
@@ -73,8 +73,9 @@ final class SpeechRunner: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
                     try? await Task.sleep(for: .seconds(deadline))
                     guard !Task.isCancelled else { return }
                     self?.synth.stopSpeaking(at: .immediate)
-                    self?.finish(with: VoiceError.processTimeout(
-                        component: "AVSpeechSynthesizer", seconds: deadline))
+                    self?.finish(
+                        with: VoiceError.processTimeout(
+                            component: "AVSpeechSynthesizer", seconds: deadline))
                 }
 
                 // AVSpeechSynthesizer must be driven from the main thread, and
@@ -84,8 +85,9 @@ final class SpeechRunner: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
                     let utter = AVSpeechUtterance(string: text)
                     utter.rate = AVSpeechUtteranceDefaultSpeechRate
                     if let voice,
-                       let v = AVSpeechSynthesisVoice.speechVoices()
-                                    .first(where: { $0.name == voice }) {
+                        let v = AVSpeechSynthesisVoice.speechVoices()
+                            .first(where: { $0.name == voice })
+                    {
                         utter.voice = v
                     }
                     // Stop whatever is currently sounding and register this
@@ -102,22 +104,68 @@ final class SpeechRunner: NSObject, AVSpeechSynthesizerDelegate, @unchecked Send
         }
     }
 
-    /// How long an utterance of `text` may reasonably take (plus slack).
+    /// How long an utterance of `text` may reasonably take, before the
+    /// watchdog gives up on `didFinish`.
+    ///
+    /// This has to be script-aware. Counting space-separated words gives a
+    /// 200-character Chinese paragraph a score of **one**, so the old
+    /// `max(5, …)` floor cut every CJK utterance off after five seconds —
+    /// on the engine the project documents as the zero-setup default.
+    /// CJK scripts are counted per character instead (~5.5 chars/s spoken);
+    /// Latin text stays on words (~2.5/s).
+    ///
+    /// The floor is deliberately generous: this is a watchdog, not a duration
+    /// estimate, and `didFinish` normally resolves the utterance long before it.
     static func deadline(for text: String) -> TimeInterval {
-        let words = text.split { $0 == " " || $0 == "\n" }.count
-        let estimated = Double(words) / 2.5 + 2.0
-        return min(300, max(5, estimated))
+        var latinWords = 0
+        var cjkScalars = 0
+        var inWord = false
+
+        for scalar in text.unicodeScalars {
+            if Self.isCJK(scalar) {
+                cjkScalars += 1
+                inWord = false
+            } else if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                inWord = false
+            } else if !inWord {
+                latinWords += 1
+                inWord = true
+            }
+        }
+
+        let seconds = Double(latinWords) / 2.5 + Double(cjkScalars) / 5.5
+        return min(300, max(30, seconds + 2))
+    }
+
+    /// True for the scripts that are spoken without spaces between words.
+    static func isCJK(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x3040...0x30FF,  // Hiragana, Katakana
+            0x3400...0x4DBF,  // CJK Unified Ideographs Extension A
+            0x4E00...0x9FFF,  // CJK Unified Ideographs
+            0xAC00...0xD7AF,  // Hangul syllables
+            0xF900...0xFAFF,  // CJK Compatibility Ideographs
+            0xFF66...0xFF9D,  // Halfwidth Katakana
+            0x20000...0x2FA1F:  // Extensions B–F + Compatibility Supplement
+            return true
+        default:
+            return false
+        }
     }
 
     // MARK: AVSpeechSynthesizerDelegate
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didFinish utterance: AVSpeechUtterance) {
+    func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didFinish utterance: AVSpeechUtterance
+    ) {
         finish(with: nil)
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didCancel utterance: AVSpeechUtterance) {
+    func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didCancel utterance: AVSpeechUtterance
+    ) {
         finish(with: CancellationError())
     }
 

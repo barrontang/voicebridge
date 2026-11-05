@@ -9,235 +9,248 @@
 //
 // TTS engine/voice selection lives on the Settings page.
 
-import SwiftUI
 import AppKit
+import SwiftUI
 import VoiceBridgeCore
 
 /// State machine for the push-to-talk STT flow.
 enum SttPhase {
-   case idle            // not recording, not busy
-   case requestingMic   // awaiting the macOS mic-permission prompt
-   case recording       // microphone live; the button now stops & transcribes
-   case transcribing    // mic stopped; whisper runs (button busy)
+    case idle  // not recording, not busy
+    case requestingMic  // awaiting the macOS mic-permission prompt
+    case recording  // microphone live; the button now stops & transcribes
+    case transcribing  // mic stopped; whisper runs (button busy)
 }
 
 struct ContentView: View {
-     @EnvironmentObject var ttsConfig: TTSConfigManager
-     @Environment(\.openSettings) private var openSettingsAction
+    @EnvironmentObject var ttsConfig: TTSConfigManager
+    @Environment(\.openSettings) private var openSettingsAction
 
-     // - TTS -
-     @State private var text = "Hello. This is VoiceBridge, running fully on device."
-     @State private var ttsStatus = "Ready."
-     @State private var speaking = false
-     @State private var currentTask: Task<Void, Never>?
-     @State private var lastWav: URL?             // for "Save .wav..."
-       /// Set when the user asked to speak with an *online* engine and has
-       /// not acknowledged yet that the text leaves the machine.
-     @State private var pendingOnlineText: String?
+    // - TTS -
+    @State private var text = "Hello. This is VoiceBridge, running fully on device."
+    @State private var ttsStatus = "Ready."
+    @State private var speaking = false
+    @State private var currentTask: Task<Void, Never>?
+    @State private var lastWav: URL?  // for "Save .wav..."
+    /// Set when the user asked to speak with an *online* engine and has
+    /// not acknowledged yet that the text leaves the machine.
+    @State private var pendingOnlineText: String?
 
-     // - STT -
-     @State private var sttPhase: SttPhase = .idle
-     @State private var sttStatus = "Ready."
-     @State private var sttModel: SttModel?
-     /// The live-caption session (mic -> router -> whisper -> transcript).
-     @StateObject private var live = LiveSttSession()
-     /// The push-to-talk recorder (mic -> router -> 16 kHz WAV).
-     @StateObject private var recorder = PushToTalkSession()
+    // - STT -
+    @State private var sttPhase: SttPhase = .idle
+    @State private var sttStatus = "Ready."
+    @State private var sttModel: SttModel?
+    /// The live-caption session (mic -> router -> whisper -> transcript).
+    @StateObject private var live = LiveSttSession()
+    /// The push-to-talk recorder (mic -> router -> 16 kHz WAV).
+    @StateObject private var recorder = PushToTalkSession()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-            Text("VoiceBridge")
-                 .font(.largeTitle.bold())
-            Text("Local speech-to-text & text-to-speech")
-                 .font(.subheadline)
-                 .foregroundStyle(.secondary)
+                Text("VoiceBridge")
+                    .font(.largeTitle.bold())
+                Text("Local speech-to-text & text-to-speech")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
-            // - - - TTS card - - -
-            VStack(alignment: .leading, spacing: 10) {
-                 HStack {
-                     Label("Text to Speech", systemImage: "speaker.wave.2.fill")
-                          .font(.headline)
-                     Spacer()
-                     Button(action: { openSettingsAction() }) {
-                         Label("Settings...", systemImage: "gearshape")
-                          }
-                          .buttonStyle(.borderless)
-                          .help("Open the TTS config page.")
-                 }
+                // - - - TTS card - - -
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Text to Speech", systemImage: "speaker.wave.2.fill")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: { openSettingsAction() }) {
+                            Label("Settings...", systemImage: "gearshape")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Open the TTS config page.")
+                    }
 
-             // Scrollable text input - supports arbitrarily long input.
-                TextEditor(text: $text)
-                      .font(.body)
-                      .frame(minHeight: 140)
-                      .border(.quaternary)
-                      .accessibilityLabel("Text to speak")
+                    // Scrollable text input - supports arbitrarily long input.
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .frame(minHeight: 140)
+                        .border(.quaternary)
+                        .accessibilityLabel("Text to speak")
 
-                 HStack(spacing: 10) {
-                     Button {
-                          speak()
-                         } label: {
-                         Label("Speak", systemImage: "play.fill")
-                          }
-                          .buttonStyle(.borderedProminent)
-                          .disabled(speaking || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    HStack(spacing: 10) {
+                        Button {
+                            speak()
+                        } label: {
+                            Label("Speak", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            speaking || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
 
-                     Button {
-                          stop()
-                         } label: {
-                         Label("Stop", systemImage: "stop.fill")
-                          }
-                          .buttonStyle(.bordered)
-                          .disabled(!Playback.isPlaying && !speaking).help("Stop current TTS playback.")
+                        Button {
+                            stop()
+                        } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!Playback.isPlaying && !speaking).help(
+                            "Stop current TTS playback.")
 
-                  // Save button enabled only when we have a real audio file on
-                  // disk (Piper / Kokoro - not the AVSpeech in-place engine).
-                    Button {
-                        saveWav()
-                       } label: {
-                       Label("Save Speech (\(lastWav?.pathExtension.uppercased() ?? "audio"))",
-                              systemImage: "square.and.arrow.down")
+                        // Save button enabled only when we have a real audio file on
+                        // disk (Piper / Kokoro - not the AVSpeech in-place engine).
+                        Button {
+                            saveWav()
+                        } label: {
+                            Label(
+                                "Save Speech (\(lastWav?.pathExtension.uppercased() ?? "audio"))",
+                                systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.bordered)
                         .disabled(lastWav == nil)
                         .help("Save the last TTS output to a .wav file you choose.")
 
-                     Spacer()
-                    Text(voiceCaption)
-                         .font(.footnote)
-                         .foregroundStyle(.secondary)
-                      .lineLimit(2)
-                 }
+                        Spacer()
+                        Text(voiceCaption)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
 
-                  // TTS status + save target.
-                 Text(ttsStatus)
-                      .font(.footnote)
-                      .foregroundStyle(.secondary)
-                      .textSelection(.enabled)
-            }
-             .padding()
-             .background(.quaternary.opacity(0.15))
-             .cornerRadius(12)
+                    // TTS status + save target.
+                    Text(ttsStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                .padding()
+                .background(.quaternary.opacity(0.15))
+                .cornerRadius(12)
 
-             // - - - STT card - - -
-            VStack(alignment: .leading, spacing: 10) {
-                 HStack {
-                     Label("Speech to Text", systemImage: "mic.fill")
-                          .font(.headline)
-                     Spacer()
-                     Text(sttModel?.label ?? "no model")
-                          .font(.footnote)
-                          .foregroundStyle(.secondary)
-                 }
+                // - - - STT card - - -
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Speech to Text", systemImage: "mic.fill")
+                            .font(.headline)
+                        Spacer()
+                        Text(sttModel?.label ?? "no model")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
-                  // Mode buttons: push-to-talk and live.
-                 HStack(spacing: 10) {
+                    // Mode buttons: push-to-talk and live.
+                    HStack(spacing: 10) {
 
-                      // Push-to-talk.
-                     Button {
-                          togglePushToTalk()
-                         } label: {
-                         Label(pushToTalkTitle, systemImage: pushToTalkIcon)
-                          }
-                          .buttonStyle(.borderedProminent)
-                          .disabled(live.isRunning || pushToTalkDisabled)
-                          .help("Record a short clip and transcribe on demand.")
+                        // Push-to-talk.
+                        Button {
+                            togglePushToTalk()
+                        } label: {
+                            Label(pushToTalkTitle, systemImage: pushToTalkIcon)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(live.isRunning || pushToTalkDisabled)
+                        .help("Record a short clip and transcribe on demand.")
 
-                      // Live / streaming.
-                     Button {
-                          toggleLive()
-                         } label: {
-                         Label(live.isRunning ? "Stop Live" : "Live (streaming)",
-                               systemImage: live.isRunning ? "stop.circle" : "dot.radiowaves.left.and.right")
-                          }
-                          .buttonStyle(.borderedProminent)
-                          .disabled(live.isRunning && live.phase == .stopping)
-                          .help("Continuous live captions via whisper (whisper-cli).")
+                        // Live / streaming.
+                        Button {
+                            toggleLive()
+                        } label: {
+                            Label(
+                                live.isRunning ? "Stop Live" : "Live (streaming)",
+                                systemImage: live.isRunning
+                                    ? "stop.circle" : "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(live.isRunning && live.phase == .stopping)
+                        .help("Continuous live captions via whisper (whisper-cli).")
 
-                  }
+                    }
 
-                  // Status: live mode or push-to-talk mode + input level.
-                 HStack(spacing: 8) {
-                    Text(displaySttStatus)
-                         .font(.footnote)
-                         .foregroundStyle(.secondary)
-                    if live.isRunning {
-                        // A cheap level meter: it proves the mic is live.
-                        LevelMeter(level: Double(live.level))
-                            .help("Microphone level")
+                    // Status: live mode or push-to-talk mode + input level.
+                    HStack(spacing: 8) {
+                        Text(displaySttStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if live.isRunning {
+                            // A cheap level meter: it proves the mic is live.
+                            LevelMeter(level: Double(live.level))
+                                .help("Microphone level")
                         }
                     }
 
-                  // While push-to-talk is recording, show that the app is
-                  // alive and reacting to the voice.
-                 if sttPhase == .recording {
-                    RecordingIndicator(level: Double(recorder.level),
-                                       label: "Recording - speak now")
+                    // While push-to-talk is recording, show that the app is
+                    // alive and reacting to the voice.
+                    if sttPhase == .recording {
+                        RecordingIndicator(
+                            level: Double(recorder.level),
+                            label: "Recording - speak now"
+                        )
                         .padding(.top, 2)
                     }
 
-                  // Scrollable transcript (live or last push-to-talk result).
-                ScrollView {
-                 Text(displayTranscript.isEmpty ? "Transcript appears here..."
-                                                : displayTranscript)
-                       .font(.body)
-                       .frame(maxWidth: .infinity, alignment: .leading)
-                       .textSelection(.enabled)
-                }
-                .frame(minHeight: 100, maxHeight: 200)
-                .border(.quaternary)
-                .accessibilityLabel("Transcript")
+                    // Scrollable transcript (live or last push-to-talk result).
+                    ScrollView {
+                        Text(
+                            displayTranscript.isEmpty
+                                ? "Transcript appears here..."
+                                : displayTranscript
+                        )
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                    }
+                    .frame(minHeight: 100, maxHeight: 200)
+                    .border(.quaternary)
+                    .accessibilityLabel("Transcript")
 
-                  // Save row.
-                 HStack(spacing: 10) {
-                    Button {
-                        saveTranscript()
-                       } label: {
-                       Label("Save Transcript (.txt)", systemImage: "doc.badge.plus")
+                    // Save row.
+                    HStack(spacing: 10) {
+                        Button {
+                            saveTranscript()
+                        } label: {
+                            Label("Save Transcript (.txt)", systemImage: "doc.badge.plus")
                         }
                         .buttonStyle(.bordered)
                         .disabled(displayTranscript.isEmpty)
 
-                    Spacer()
+                        Spacer()
 
-                 // Small legend: which whisper model, live/push-to-talk status,
-                 // etc.
-                    Text(legend)
-                         .font(.caption2)
-                         .foregroundStyle(.secondary)
-                 }
+                        // Small legend: which whisper model, live/push-to-talk status,
+                        // etc.
+                        Text(legend)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+                .background(.quaternary.opacity(0.15))
+                .cornerRadius(12)
+
             }
-             .padding()
-             .background(.quaternary.opacity(0.15))
-             .cornerRadius(12)
-
-         }
-         }
-          .padding()
-          .frame(minWidth: 560, minHeight: 700)
-          .onAppear {
+        }
+        .padding()
+        .frame(minWidth: 560, minHeight: 700)
+        .onAppear {
             ttsConfig.scan()
             Playback.assumesRunningLoop = true
             applySttModel(ttsConfig.selectedSttModel)
             if sttModel == nil {
-                sttStatus = "No whisper model on disk - run scripts/fetch-whisper-turbo.sh."
-             } else {
+                sttStatus = "No whisper model on disk - download one in Settings (Cmd-,)."
+            } else {
                 sttStatus = "Ready."
-             }
-         }
-         // Re-apply when the Settings STT model changes.
-          .onChange(of: ttsConfig.selectedSttModel) {
+            }
+        }
+        // Re-apply when the Settings STT model changes.
+        .onChange(of: ttsConfig.selectedSttModel) {
             applySttModel(ttsConfig.selectedSttModel)
-         }
-          // A model was just downloaded (or removed): pick it up right away
-          // instead of waiting for a restart.
-          .onChange(of: ttsConfig.availableSttModels) {
+        }
+        // A model was just downloaded (or removed): pick it up right away
+        // instead of waiting for a restart.
+        .onChange(of: ttsConfig.availableSttModels) {
             applySttModel(ttsConfig.selectedSttModel)
-          }
-          .alert("Send this text to Microsoft's servers?",
-                 isPresented: Binding(
-                    get: { pendingOnlineText != nil },
-                    set: { if !$0 { pendingOnlineText = nil } })) {
+        }
+        .alert(
+            "Send this text to a remote service?",
+            isPresented: Binding(
+                get: { pendingOnlineText != nil },
+                set: { if !$0 { pendingOnlineText = nil } })
+        ) {
             Button("Send it", role: .destructive) {
                 onlineConsentGiven = true
                 if let pending = pendingOnlineText {
@@ -246,48 +259,61 @@ struct ContentView: View {
                 }
             }
             Button("Cancel", role: .cancel) { pendingOnlineText = nil }
-            } message: {
-                Text("The Edge TTS engine is online: the text is sent to a Microsoft "
-                     + "service and is not kept on your Mac. Pick a local engine "
-                     + "(Piper, Kokoro, Built-in) to stay offline.")
-            }
+        } message: {
+            // The copy names the engine that is actually selected: it used
+            // to say "The Edge TTS engine" for every online engine.
+            Text(onlineConsentMessage)
+        }
     }
 
-     /// Whether the user already agreed to send text to an online engine.
+    /// The consent copy for the selected engine (see `EnginePrivacy`).
+    private var onlineConsentMessage: String {
+        EnginePrivacy.consentMessage(
+            for: ttsConfig.selectedMode,
+            modelRoot: ttsConfig.paths.root)
+            ?? "This engine sends your text to a remote service."
+    }
+
+    /// Whether the user already agreed to send text to an online engine.
     @AppStorage("voicebridge.onlineConsent") private var onlineConsentGiven = false
 
-     // ---------- View models ----------
+    // ---------- View models ----------
 
-     /// Short caption for the TTS card.
+    /// Short caption for the TTS card.
     private var voiceCaption: String {
-        var s = ttsConfig.selectedMode.rawValue
+        var s = ttsConfig.selectedMode.displayName
         if let v = ttsConfig.selectedModelFile { s += "    voice: \(v)" }
         return s
     }
 
-     /// The active transcript to display: live when streaming, otherwise the
-     /// last push-to-talk result.
+    /// The active transcript to display.
+    ///
+    /// Live captions must survive the moment the session stops — that is
+    /// exactly when the user wants to read or save them. Falling straight back
+    /// to `lastPushToTalkTranscript` (cleared when a live session starts) made
+    /// the text vanish on Stop, so "Save Transcript" could never capture a live
+    /// session at all.
     private var displayTranscript: String {
         if live.isRunning { return live.transcript }
-        return lastPushToTalkTranscript
+        return lastPushToTalkTranscript.isEmpty ? live.transcript : lastPushToTalkTranscript
     }
 
     @State private var lastPushToTalkTranscript = ""
 
-     /// "Ready" / "Transcribing…" / "Live" / "Microphone denied…", etc.
+    /// "Ready" / "Transcribing…" / "Live" / "Microphone denied…", etc.
     private var displaySttStatus: String {
         if live.isRunning { return live.status }
         return sttStatus
     }
 
-     /// A short model / status legend under the transcript.
+    /// A short model / status legend under the transcript.
     private var legend: String {
         guard let m = sttModel else { return "(no model)" }
         let live = live.isRunning ? " · LIVE" : ""
         return "\(m.label) / \(m.ggmlFilename)\(live)"
     }
 
-     /// Disable the push-to-talk button when live or busy already.
+    /// Disable the push-to-talk button when live or busy already.
     private var pushToTalkDisabled: Bool {
         live.isRunning || sttPhase == .requestingMic || sttPhase == .transcribing
     }
@@ -295,119 +321,114 @@ struct ContentView: View {
     private var pushToTalkTitle: String {
         switch sttPhase {
         case .idle, .requestingMic: return "Start Listening"
-        case .recording:            return "Stop & Transcribe"
-        case .transcribing:         return "Transcribing..."
+        case .recording: return "Stop & Transcribe"
+        case .transcribing: return "Transcribing..."
         }
     }
 
     private var pushToTalkIcon: String {
         switch sttPhase {
-        case .recording:    return "stop.circle"
+        case .recording: return "stop.circle"
         case .transcribing: return "hourglass"
-        case .idle:         return "mic.circle"
-        case .requestingMic:return "mic"
+        case .idle: return "mic.circle"
+        case .requestingMic: return "mic"
         }
     }
 
     // ---------- TTS actions ----------
 
-     /// Speak the text. Cancels any in-flight task first, stops all audio.
+    /// Speak the text. Cancels any in-flight task first, stops all audio.
     @MainActor
-     private func speak() {
+    private func speak() {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         // A remote engine sends the text off this Mac: ask first.
         if ttsConfig.selectedEngineIsRemote && !onlineConsentGiven {
             pendingOnlineText = text
             return
-            }
-        performSpeak(text)
         }
+        performSpeak(text)
+    }
 
-       /// The actual speak call (after any consent step).
+    /// The actual speak call (after any consent step).
     @MainActor
     private func performSpeak(_ text: String) {
         currentTask?.cancel()
         Playback.stopAll()
         speaking = true
-        ttsStatus = "Speaking via \(ttsConfig.selectedMode.rawValue)…"
+        ttsStatus = "Speaking via \(ttsConfig.selectedMode.displayName)…"
 
         let mode = ttsConfig.selectedMode
         let voice = ttsConfig.selectedModelFile
         currentTask = Task {
             do {
-                 let result = try await TTSManager(config: ttsConfig)
-                                   .speak(text, mode: mode, voice: voice, play: true)
+                let result = try await TTSManager(config: ttsConfig)
+                    .speak(text, mode: mode, voice: voice, play: true)
                 if !Task.isCancelled {
-                  var s = "Playing \(result.url.lastPathComponent) - \(result.engineName)"
-                  if result.fellBack { s += "   (\(result.statusLine))" }
-                  if let notice = result.privacyNotice { s += "   [\(notice)]" }
-                  ttsStatus = s
-                     // Only a real audio file can be saved; the in-place
-                     // (AVSpeech) engine produces no file at all.
-                  lastWav = result.hasAudioFile ? result.url : nil
-                  }
+                    var s = "Playing \(result.url.lastPathComponent) - \(result.engineName)"
+                    if result.fellBack { s += "   (\(result.statusLine))" }
+                    if let notice = result.privacyNotice { s += "   [\(notice)]" }
+                    ttsStatus = s
+                    // Only a real audio file can be saved; the in-place
+                    // (AVSpeech) engine produces no file at all.
+                    lastWav = result.hasAudioFile ? result.url : nil
+                }
             } catch {
                 if !Task.isCancelled {
-                    ttsStatus = "Error: \(error.localizedDescription)"}
+                    ttsStatus = "Error: \(error.localizedDescription)"
+                }
             }
-          if !Task.isCancelled {
-              speaking = false
-              if currentTask == nil { ttsStatus = "Done." }
-          }
-      }
-  }
+            if !Task.isCancelled {
+                speaking = false
+            }
+        }
+    }
 
-     /// Stop all TTS.
+    /// Stop all TTS.
     @MainActor
-     private func stop() {
+    private func stop() {
         currentTask?.cancel()
         currentTask = nil
         Playback.stopAll()
         speaking = false
         ttsStatus = "Stopped."
-     }
-
-     /// Save the last TTS output to a user-chosen .wav file.
-     @MainActor
-     private func saveWav() {
-        guard let url = lastWav,
-              FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else {
-          NSSound.beep()
-          ttsStatus = "No .wav to save yet."
-          return
-     }
-     let ext = url.pathExtension.isEmpty ? "wav" : url.pathExtension
-     let defaultName = "voicebridge-\(Date().timeIntervalSince1970).\(ext)"
-     if let chosen = SaveDialog.save(data, defaultName: defaultName) {
-         ttsStatus = "Saved WAV to \(chosen.lastPathComponent)."
-         } else {
-         ttsStatus = "Save cancelled."
-         }
-     }
-
-     /// Whether the lastWav URL still points to a file on disk.
-    private func lastWavExists() -> Bool {
-        guard let url = lastWav else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
     }
 
-     // ---------- STT actions ----------
+    /// Save the last TTS output to a user-chosen .wav file.
+    @MainActor
+    private func saveWav() {
+        guard let url = lastWav,
+            FileManager.default.fileExists(atPath: url.path),
+            let data = try? Data(contentsOf: url)
+        else {
+            NSSound.beep()
+            ttsStatus = "No .wav to save yet."
+            return
+        }
+        let ext = url.pathExtension.isEmpty ? "wav" : url.pathExtension
+        let defaultName = "voicebridge-\(Date().timeIntervalSince1970).\(ext)"
+        if let chosen = SaveDialog.save(data, defaultName: defaultName) {
+            ttsStatus = "Saved WAV to \(chosen.lastPathComponent)."
+        } else {
+            ttsStatus = "Save cancelled."
+        }
+    }
 
-     /// Toggle the push-to-talk flow.
-     @MainActor
-     private func togglePushToTalk() {
+    // ---------- STT actions ----------
+
+    /// Toggle the push-to-talk flow.
+    @MainActor
+    private func togglePushToTalk() {
         switch sttPhase {
-        case .recording:     stopAndTranscribe()
-        case .idle:          startListening()
+        case .recording: stopAndTranscribe()
+        case .idle: startListening()
         case .requestingMic, .transcribing:
             // Busy - do nothing.
             break
         }
-     }
+    }
 
-     @MainActor
-     private func startListening() {
+    @MainActor
+    private func startListening() {
         guard let model = sttModel else {
             sttStatus = "No whisper model on disk."
             return
@@ -418,15 +439,16 @@ struct ContentView: View {
             let granted = await PushToTalkSession.requestPermission()
             guard granted else {
                 sttPhase = .idle
-                sttStatus = "Microphone denied - enable in System Settings > Privacy & Security > Microphone."
+                sttStatus =
+                    "Microphone denied - enable in System Settings > Privacy & Security > Microphone."
                 return
             }
             startCapture(voice: model)
         }
-     }
+    }
 
-     @MainActor
-     private func startCapture(voice: SttModel) {
+    @MainActor
+    private func startCapture(voice: SttModel) {
         let dir = ttsConfig.paths.cacheDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("mic-\(UUID().uuidString).wav")
@@ -440,67 +462,82 @@ struct ContentView: View {
                 sttStatus = "Could not start the mic: \(error.localizedDescription)"
             }
         }
-     }
+    }
 
-     @MainActor
-     private func stopAndTranscribe() {
-        // The recorder finalizes its WAV on stop, so the file on disk is
-        // complete the moment this returns (no "sleep and hope it flushed").
-        let audioURL = (try? recorder.stop()) ?? recorder.outputURL
+    @MainActor
+    private func stopAndTranscribe() {
         sttPhase = .transcribing
         sttStatus = "Transcribing…"
 
         let model = sttModel ?? availableSttModel()
         Task {
             do {
+                // `stop()` finalizes the WAV off the main thread and resolves
+                // only once the file is complete (no "sleep and hope it flushed").
+                let stopped = await recorder.stop()
+                let audioURL = stopped ?? recorder.outputURL
                 guard let model, let audioURL,
-                      FileManager.default.fileExists(atPath: audioURL.path) else {
+                    FileManager.default.fileExists(atPath: audioURL.path)
+                else {
                     sttPhase = .idle
                     sttStatus = "No audio on disk - check mic & permission."
                     return
                 }
-                   // The backend must resolve models from the *configured*
-                   // root, not the built-in default.
+                // The backend must resolve models from the *configured*
+                // root, not the built-in default.
                 let t = try await WhisperCliBackend(modelDirectory: ttsConfig.paths.whisperDir)
-                               .transcribe(audio: audioURL,
-                                          language: nil,
-                                          model: model,
-                                          useTimestamps: false)
+                    .transcribe(
+                        audio: audioURL,
+                        language: nil,
+                        model: model,
+                        useTimestamps: false)
                 lastPushToTalkTranscript = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 sttPhase = .idle
-                sttStatus = "Recognized · \(t.model.label) · "
-                      + String(format: "%.1fs", t.durationSeconds)
-                      + " · \(t.language)"
+                sttStatus =
+                    "Recognized · \(t.model.label) · "
+                    + String(format: "%.1fs", t.durationSeconds)
+                    + " · \(t.language)"
             } catch {
                 sttPhase = .idle
                 sttStatus = "Transcribe failed: \(error.localizedDescription)"
             }
         }
-     }
+    }
 
-     /// Toggle live streaming STT (start if idle, stop if live).
-     @MainActor
-     private func toggleLive() {
+    /// Toggle live streaming STT (start if idle, stop if live).
+    @MainActor
+    private func toggleLive() {
         switch live.phase {
         case .idle:
             if sttModel == nil {
-                sttStatus = "No whisper model on disk - run scripts/fetch-whisper-turbo.sh."
+                sttStatus = "No whisper model on disk - download one in Settings (Cmd-,)."
                 return
             }
-            lastPushToTalkTranscript = ""   // clear the view; live will drive displayTranscript
+            lastPushToTalkTranscript = ""  // clear the view; live will drive displayTranscript
             Task { await live.start() }
         case .live:
-            Task { await live.stop() }
+            Task {
+                await live.stop()
+                // Keep the finished transcript visible *and* saveable, and stop
+                // the status line from sitting on "Stopping live…" forever.
+                if !live.transcript.isEmpty {
+                    lastPushToTalkTranscript = live.transcript
+                }
+                sttStatus =
+                    live.transcript.isEmpty
+                    ? "No speech detected."
+                    : "Live transcript ready."
+            }
             sttStatus = "Stopping live…"
         case .stopping:
             // already stopping - ignore.
             break
         }
-     }
+    }
 
-     /// Save the current transcript to a user-chosen .txt file.
-     @MainActor
-     private func saveTranscript() {
+    /// Save the current transcript to a user-chosen .txt file.
+    @MainActor
+    private func saveTranscript() {
         let text = displayTranscript
         let name = "voicebridge-transcript-\(Date().timeIntervalSince1970).txt"
         if let url = SaveDialog.saveText(text, defaultName: name) {
@@ -508,11 +545,11 @@ struct ContentView: View {
         } else {
             sttStatus = "Save cancelled or failed."
         }
-     }
+    }
 
-     // ---------- Helpers ----------
+    // ---------- Helpers ----------
 
-     /// First whisper model physically present on disk (preferred order).
+    /// First whisper model physically present on disk (preferred order).
     ///
     /// Resolved against the *configured* model root, so a custom folder is
     /// honoured here too (the old static read ignored it - the "half my
@@ -523,17 +560,18 @@ struct ContentView: View {
             if FileManager.default.fileExists(atPath: url.path) { return m }
         }
         return nil
-     }
+    }
 
-       // Resolve the model to use: prefer the Settings choice when it is on
-       // disk, else the first whisper model present, else nil. Also sync the
-       // live stream's model when it is idle.
-      @MainActor private func applySttModel(_ requested: SttModel) {
+    // Resolve the model to use: prefer the Settings choice when it is on
+    // disk, else the first whisper model present, else nil. Also sync the
+    // live stream's model when it is idle.
+    @MainActor private func applySttModel(_ requested: SttModel) {
         let onDisk = ttsConfig.paths.whisperDir
-                 .appendingPathComponent(requested.ggmlFilename)
-        let chosen = FileManager.default.fileExists(atPath: onDisk.path)
-                 ? requested
-                            : availableSttModel()
+            .appendingPathComponent(requested.ggmlFilename)
+        let chosen =
+            FileManager.default.fileExists(atPath: onDisk.path)
+            ? requested
+            : availableSttModel()
         sttModel = chosen
         // Keep the status line in sync with what is actually usable - a model
         // that was just downloaded must light the card up immediately.
@@ -544,12 +582,13 @@ struct ContentView: View {
         }
         // The live session keeps its own model + folders; sync it when it is
         // not running (the settings page can change the model folder).
-        live.apply(LiveSttSession.Configuration(
-            model: chosen ?? .tiny,
-            modelDirectory: ttsConfig.paths.whisperDir,
-            scratchDir: ttsConfig.paths.cacheDir,
-            // A local whisper.cpp server keeps the model resident - no
-            // process spawn per window.
-            serverURL: WhisperServerBackend.fromEnvironment()?.baseURL))
-       }
+        live.apply(
+            LiveSttSession.Configuration(
+                model: chosen ?? .tiny,
+                modelDirectory: ttsConfig.paths.whisperDir,
+                scratchDir: ttsConfig.paths.cacheDir,
+                // A local whisper.cpp server keeps the model resident - no
+                // process spawn per window.
+                serverURL: WhisperServerBackend.fromEnvironment()?.baseURL))
+    }
 }

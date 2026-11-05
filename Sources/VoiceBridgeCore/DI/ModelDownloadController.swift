@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Fetches one remote file into a local path.
 ///
@@ -12,9 +12,10 @@ public protocol ModelFetcher: Sendable {
     /// The file must be complete and in place when the call returns; an
     /// implementation that fails must leave nothing behind that could pass
     /// for an installed model.
-    func fetch(_ remote: URL,
-               to destination: URL,
-               progress: @escaping @Sendable (Double) -> Void) async throws
+    func fetch(
+        _ remote: URL,
+        to destination: URL,
+        progress: @escaping @Sendable (Double) -> Void) async throws
 }
 
 /// The production fetcher: a streaming download with a disk-space preflight.
@@ -24,9 +25,11 @@ public struct URLSessionModelFetcher: ModelFetcher {
 
     public init() {}
 
-    public func fetch(_ remote: URL,
-                      to destination: URL,
-                      progress: @escaping @Sendable (Double) -> Void) async throws {
+    public func fetch(
+        _ remote: URL,
+        to destination: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
         let directory = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
@@ -37,7 +40,7 @@ public struct URLSessionModelFetcher: ModelFetcher {
 
         for try await update in await downloader.download(remote, to: destination) {
             progress(update.fractionComplete)
-            }
+        }
     }
 
     /// The size of a remote file, when the server tells us.
@@ -45,7 +48,8 @@ public struct URLSessionModelFetcher: ModelFetcher {
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let head = response as? HTTPURLResponse else { return nil }
+            let head = response as? HTTPURLResponse
+        else { return nil }
         let length = head.expectedContentLength
         return length > 0 ? length : nil
     }
@@ -117,8 +121,11 @@ public final class ModelDownloadController: ObservableObject {
         }
         let destination = model.destination(in: root)
         let companions = model.companions.map {
-            (url: $0.remoteURL,
-             destination: destination.deletingLastPathComponent().appendingPathComponent($0.fileName))
+            (
+                url: $0.remoteURL,
+                destination: destination.deletingLastPathComponent().appendingPathComponent(
+                    $0.fileName)
+            )
         }
         let fetcher = self.fetcher
 
@@ -137,13 +144,24 @@ public final class ModelDownloadController: ObservableObject {
                     Task { @MainActor [weak self] in
                         guard let self, let active = self.activeModelID else { return }
                         self.progress[active] = fraction
-                        }
                     }
+                }
                 for companion in companions {
                     try await fetcher.fetch(companion.url, to: companion.destination) { _ in }
                 }
+                // Integrity: a mismatch must *discard* the file, not leave it
+                // where `isInstalled` will happily report it forever. The
+                // error text promises exactly that.
                 if let expected = model.sha256 {
-                    try await ModelDownloader.verifySHA256(of: destination, expected: expected)
+                    do {
+                        try await ModelDownloader.verifySHA256(of: destination, expected: expected)
+                    } catch {
+                        try? FileManager.default.removeItem(at: destination)
+                        for companion in companions {
+                            try? FileManager.default.removeItem(at: companion.destination)
+                        }
+                        throw error
+                    }
                 }
                 self.status = "Installed \(model.displayName)."
                 // The model is on disk now - let the app rescan.

@@ -1,6 +1,6 @@
-import Foundation
-import Combine
 import AVFoundation
+import Combine
+import Foundation
 
 /// Push-to-talk recording: mic → router → 16 kHz mono WAV on disk.
 ///
@@ -53,9 +53,10 @@ public final class PushToTalkSession: ObservableObject {
     public func start(url: URL) async throws {
         guard !isRecording else { return }
         guard await Self.requestPermission() else {
-            status = "Microphone denied - enable it in System Settings > Privacy & Security > Microphone."
+            status =
+                "Microphone denied - enable it in System Settings > Privacy & Security > Microphone."
             throw VoiceError.permissionDenied(capability: "microphone")
-            }
+        }
 
         accumulator.reset()
         outputURL = url
@@ -74,21 +75,25 @@ public final class PushToTalkSession: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.level = min(1, rms * 4)
-                }
             }
+        }
         do {
             try router.start()
-            } catch {
+        } catch {
             isRecording = false
             phase = .idle
             status = "Could not start the mic: \(error.localizedDescription)"
             throw error
-            }
         }
+    }
 
     /// Stop recording and finalize the WAV. Returns the file URL.
+    ///
+    /// Async because the finalize writes the whole take to disk: at the
+    /// 10-minute cap that is ~38 MB of PCM, which used to happen on the main
+    /// actor and stall the UI right when the user pressed the button.
     @discardableResult
-    public func stop() throws -> URL? {
+    public func stop() async -> URL? {
         guard isRecording else { return outputURL }
         router.stop()
         level = 0
@@ -99,10 +104,21 @@ public final class PushToTalkSession: ObservableObject {
 
         guard let url = outputURL else { return nil }
         let samples = accumulator.drain()
-        try WAVWriter.write(samples: samples, sampleRate: AudioFrame.sampleRate, to: url)
-        status = "Recorded \(String(format: "%.1f", Double(samples.count) / AudioFrame.sampleRate))s"
-        return url
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                _ = try WAVWriter.write(
+                    samples: samples,
+                    sampleRate: AudioFrame.sampleRate,
+                    to: url)
+            }.value
+        } catch {
+            status = "Could not write the recording: \(error.localizedDescription)"
+            return nil
         }
+        status =
+            "Recorded \(String(format: "%.1f", Double(samples.count) / AudioFrame.sampleRate))s"
+        return url
+    }
 
 }
 
@@ -113,7 +129,9 @@ private final class SampleAccumulator: @unchecked Sendable {
     private var storage: [Float] = []
 
     func reset() {
-        lock.lock(); storage.removeAll(keepingCapacity: true); lock.unlock()
+        lock.lock()
+        storage.removeAll(keepingCapacity: true)
+        lock.unlock()
     }
 
     func append(_ frame: AudioFrame, limit: Int) {
@@ -123,7 +141,7 @@ private final class SampleAccumulator: @unchecked Sendable {
             let room = max(0, limit - storage.count)
             storage.append(contentsOf: frame.samples.prefix(room))
             return
-            }
+        }
         storage.append(contentsOf: frame.samples)
     }
 
