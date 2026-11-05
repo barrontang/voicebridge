@@ -93,6 +93,17 @@ jobs:
             exit 1
           fi
 
+      - name: The app icon is complete
+        # `make-app.sh` copies Resources/AppIcon.icns into the bundle; a
+        # truncated or missing icns means Finder shows a generic document.
+        run: |
+          iconutil -c iconset Resources/AppIcon.icns -o "$RUNNER_TEMP/AppIcon.iconset"
+          COUNT=$(ls "$RUNNER_TEMP/AppIcon.iconset" | wc -l | tr -d ' ')
+          if [ "$COUNT" -lt 10 ]; then
+            echo "::error::AppIcon.icns has $COUNT representations, expected 10."
+            exit 1
+          fi
+
       - name: The model catalog still matches the server
         # The downloader only verifies a checksum when the catalog entry carries
         # one, so a stale or missing value silently disables the integrity check.

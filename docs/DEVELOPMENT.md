@@ -51,6 +51,7 @@ permission and a stable code-signing identity.
 | Formatting | `xcrun swift-format lint --strict` | unreviewable whitespace diffs |
 | Version sync | `VERSION` == CLI `static let version` | a release that reports the wrong version |
 | Catalog drift | `scripts/verify-catalog.sh` | a model download that silently skips its SHA-256 |
+| Icon completeness | `iconutil -c iconset` round-trip | a truncated `.icns` (Finder shows a blank document) |
 
 The greps are intentionally crude: they are cheap tripwires, not a type system.
 A legitimate exception goes in a `///` comment line, which the grep skips.
@@ -228,8 +229,6 @@ model folders work. Sandboxing becomes realistic only after P0.
 user-selected read-only file access are in an entitlements file, and the model
 folder is a security-scoped bookmark.
 
----
-
 ## 8. Release checklist
 
 The version lives in **three** places; the CI gate only checks two of them.
@@ -266,3 +265,19 @@ environment is also a hijack vector.
 | `VOICEBRIDGE_FISH_REFERENCE` / `_REFERENCE_TEXT` / `_API_KEY` / `_MODEL` | cloning + auth |
 | `VOICEBRIDGE_CONFIG_PATH` | redirect `config.json` (tests use this) |
 | `VOICEBRIDGE_NETWORK_TESTS=1` | opt in to the live download test |
+
+---
+
+## 10. The app icon
+
+`Resources/AppIcon.icns` is built from two committed masters
+(`AppIcon-1024.png`, `AppIcon-1024-small.png`): 16–64 px use the simplified art
+because the sound arcs turn to mush there. Regenerate after a design change:
+
+```bash
+scripts/make-icon.sh --redraw   # needs a python3 with Pillow
+scripts/make-icon.sh            # just rebuild the .icns (sips + iconutil)
+```
+
+`make-app.sh` copies the `.icns` into the bundle and points `CFBundleIconFile`
+at it; `dev-check.sh` and CI fail if the icns loses a representation.

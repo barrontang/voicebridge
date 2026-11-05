@@ -155,8 +155,9 @@ folder, and the model downloads.
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
 | `Tests/VoiceBridgeCoreTests/` | 143 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
+| `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
-| `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `verify-catalog.sh` |
+| `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `make-icon.sh` · `verify-catalog.sh` |
 | `skills/voicebridge-tts/` | An agent skill: pipe any text into `voicebridge-cli tts`. |
 
 ---

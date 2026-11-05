@@ -96,6 +96,21 @@ else
   fi
 fi
 
+# ── 6b. The app icon ──────────────────────────────────────────────────────
+step "the app icon is complete"
+if [ ! -f Resources/AppIcon.icns ]; then
+  bad "Resources/AppIcon.icns is missing — run scripts/make-icon.sh"
+else
+  icns_dir="$(mktemp -d)"
+  if iconutil -c iconset Resources/AppIcon.icns -o "$icns_dir/AppIcon.iconset" 2>/dev/null \
+      && [ "$(ls "$icns_dir/AppIcon.iconset" | wc -l | tr -d ' ')" -ge 10 ]; then
+    ok "AppIcon.icns has $(ls "$icns_dir/AppIcon.iconset" | wc -l | tr -d ' ') representations"
+  else
+    bad "AppIcon.icns is incomplete — rebuild it with scripts/make-icon.sh"
+  fi
+  rm -rf "$icns_dir"
+fi
+
 # ── 7. Version consistency ─────────────────────────────────────────────────
 step "VERSION matches the CLI"
 CLI_VERSION=$(grep -oE 'static let version = "[^"]+"' Sources/voicebridge-cli/VoiceBridgeCLI.swift \

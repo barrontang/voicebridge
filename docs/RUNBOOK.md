@@ -228,7 +228,7 @@ the result; a linear-interpolation fallback covers exotic formats.
 ## 6. The app
 
 ```bash
-./scripts/make-app.sh release        # → Build/VoiceBridge.app
+./scripts/make-app.sh release        # → Build/VoiceBridge.app (icon included)
 open Build/VoiceBridge.app
 ```
 
