@@ -5,7 +5,13 @@ public actor LiveTranscriptEngine {
     public struct Config: Sendable {
         /// Sliding window handed to whisper on each pass.
         public var windowSeconds: TimeInterval = 4.0
-        /// Left context so whisper doesn't truncate word boundaries.
+        /// Already-heard audio prepended to each window as *context*.
+        ///
+        /// Whisper decodes every window independently, so a fragment that
+        /// starts at a VAD boundary had no left context at all: the first word
+        /// of each utterance was decoded from silence. This field existed with
+        /// a comment claiming it did that, but nothing read it. The pre-roll is
+        /// context only - the reconciler's watermark drops re-emitted audio.
         public var overlapSeconds: TimeInterval = 0.8
         public var ringBufferSeconds: TimeInterval = 60
 
@@ -29,6 +35,13 @@ public actor LiveTranscriptEngine {
 
     private var windowIndex = 0
     private var lastPartialAt: TimeInterval = -.infinity
+    /// End of the last audio a final pass actually committed.
+    ///
+    /// The pre-roll must never reach back into speech the transcript already
+    /// covers: at the 30 s hard cap there is no pause to land in, so the extra
+    /// audio would duplicate the previous words (or, once the watermark drops
+    /// them, swallow the first word of the next chunk).
+    private var committedEnd: TimeInterval = 0
     private var isRunning = false
 
     private var partialTask: Task<Void, Never>?
@@ -55,6 +68,7 @@ public actor LiveTranscriptEngine {
         isRunning = true
         windowIndex = 0
         lastPartialAt = -.infinity
+        committedEnd = 0
         reconciler.reset()
         ring = AudioRingBuffer(capacitySeconds: config.ringBufferSeconds)
         segmenter = UtteranceSegmenter()
@@ -146,7 +160,7 @@ public actor LiveTranscriptEngine {
         // back to a trailing window.
         let lo = segmenter.currentUtteranceStart ?? max(0, now - config.windowSeconds)
         let range = lo..<now
-        guard let (samples, startTime) = ring.extract(range), !samples.isEmpty else { return }
+        guard let (samples, startTime) = audioForWindow(range) else { return }
 
         // Supersede in-flight partial — newer audio is more valuable.
         partialTask?.cancel()
@@ -197,7 +211,7 @@ public actor LiveTranscriptEngine {
         while !pendingFinals.isEmpty {
             let pending = pendingFinals.removeFirst()
             let range = pending.range
-            guard let (samples, startTime) = ring.extract(range), !samples.isEmpty else { continue }
+            guard let (samples, startTime) = audioForWindow(range) else { continue }
             let idx = nextWindowIndex()
             let utteranceID = pending.utteranceID
             do {
@@ -215,6 +229,8 @@ public actor LiveTranscriptEngine {
                     windowIndex: idx,
                     utteranceID: utteranceID,
                     isFinal: true)
+                // Only now may the next window's pre-roll stop at this point.
+                committedEnd = max(committedEnd, range.upperBound)
             } catch {
                 emitGap(range)
             }
@@ -244,6 +260,26 @@ public actor LiveTranscriptEngine {
 
     private func emitGap(_ range: Range<TimeInterval>) {
         continuation?.yield(.gap(range))
+    }
+
+    /// The audio for one pass: `overlapSeconds` of already-heard audio in
+    /// front of `range`, so whisper has left context instead of a fragment
+    /// that starts in silence.
+    ///
+    /// The returned `startTime` is the *context* start, not the utterance
+    /// start, so the backend's relative timings still map to absolute audio
+    /// time. Re-emitted committed audio is dropped downstream by the
+    /// reconciler's watermark (1 second of trailing silence now guarantees the
+    /// pre-roll lands in a pause, never in committed speech).
+    private func audioForWindow(_ range: Range<TimeInterval>) -> (
+        samples: [Float], startTime: TimeInterval
+    )? {
+        let lower = max(max(0, range.lowerBound - config.overlapSeconds), committedEnd)
+        guard lower < range.upperBound else { return nil }
+        guard let (samples, startTime) = ring.extract(lower..<range.upperBound),
+            !samples.isEmpty
+        else { return nil }
+        return (samples, startTime)
     }
 
     private func nextWindowIndex() -> Int {

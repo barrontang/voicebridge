@@ -27,6 +27,8 @@
 
 - **🎤 Speech-to-Text** — `whisper.cpp` with Metal (GPU) acceleration, `large-v3-turbo` by default.
   - **Live captions**: word-by-word, VAD-segmented utterances, committed once and never re-worded.
+    Live uses the same model you picked, a pinned language, and 0.8 s of left context per
+    window — the three things that made it read worse than push-to-talk before.
   - **Push-to-talk**: record a clip, transcribe it.
   - **Any input format**: mp3, m4a, aiff, wav, … are transcoded to whisper's shape automatically.
   - **Batch mode**: transcribe a whole folder from the CLI.
@@ -46,7 +48,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  139 unit tests run in CI in under a second.
+  143 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -151,7 +153,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 139 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 143 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
 | `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `verify-catalog.sh` |

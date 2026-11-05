@@ -35,6 +35,12 @@ public final class LiveSttSession: ObservableObject {
         public var modelDirectory: URL
         /// Where the per-window WAVs are written.
         public var scratchDir: URL
+        /// whisper language code (`"en"`, `"zh"`, …); `nil` auto-detects.
+        ///
+        /// Auto-detection on a 1-2 s window is unreliable and can flip between
+        /// utterances, producing the wrong script entirely. A pinned language
+        /// is the single biggest accuracy win for non-English speech.
+        public var language: String?
         /// Minimum wall-clock gap between two partial passes.
         public var partialInterval: TimeInterval
         /// How much trailing audio a partial pass covers.
@@ -48,6 +54,7 @@ public final class LiveSttSession: ObservableObject {
 
         public init(
             model: SttModel = .largeV3Turbo,
+            language: String? = nil,
             modelDirectory: URL = ModelPaths.fromEnvironment().whisperDir,
             scratchDir: URL = ModelPaths.fromEnvironment().cacheDir,
             partialInterval: TimeInterval = 1.2,
@@ -56,6 +63,7 @@ public final class LiveSttSession: ObservableObject {
             serverURL: URL? = nil
         ) {
             self.model = model
+            self.language = language
             self.modelDirectory = modelDirectory
             self.scratchDir = scratchDir
             self.partialInterval = partialInterval
@@ -270,6 +278,7 @@ extension LiveSttSession.Configuration {
     public var engineConfig: LiveTranscriptEngine.Config {
         var config = LiveTranscriptEngine.Config()
         config.model = model.rawValue
+        config.language = language
         config.partialInterval = partialInterval
         config.windowSeconds = windowSeconds
         config.ringBufferSeconds = ringBufferSeconds

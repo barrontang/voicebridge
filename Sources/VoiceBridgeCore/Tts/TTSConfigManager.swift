@@ -44,6 +44,14 @@ public final class TTSConfigManager: ObservableObject {
     @Published public var selectedSttModel: SttModel = .largeV3Turbo {
         didSet { persist() }
     }
+    /// The whisper language code, or `nil` to auto-detect per utterance.
+    ///
+    /// Pinning the language matters most for live captions: a 1-2 s window is
+    /// not enough audio for whisper's language ID, so an unpinned Chinese turn
+    /// can come back as English or Japanese. Persisted with the rest.
+    @Published public var selectedSttLanguage: String? = nil {
+        didSet { persist() }
+    }
     /// whisper models physically present under `whisperDir` (refreshed by `scan()`).
     @Published public private(set) var availableSttModels: [SttModel] = []
 
@@ -136,6 +144,8 @@ public final class TTSConfigManager: ObservableObject {
             let mode: TTSMode
             let voice: String?
             let sttModel: SttModel?
+            /// Optional whisper language code; `nil` = auto-detect per window.
+            let sttLanguage: String?
             /// v2: the user's custom model root (the default location when nil).
             let root: String?
         }
@@ -144,6 +154,7 @@ public final class TTSConfigManager: ObservableObject {
             mode: selectedMode,
             voice: selectedModelFile,
             sttModel: selectedSttModel,
+            sttLanguage: selectedSttLanguage,
             root: modelRoot.path)
         do {
             let data = try JSONEncoder().encode(cfg)
@@ -184,12 +195,14 @@ public final class TTSConfigManager: ObservableObject {
             let mode: TTSMode?
             let voice: String?
             let sttModel: SttModel?
+            let sttLanguage: String?
             let root: String?
         }
         struct CfgLegacy: Decodable {  // schemaVersion 0 / pre-versioning
             let mode: TTSMode?
             let voice: String?
             let sttModel: SttModel?
+            let sttLanguage: String?
         }
 
         guard let cfg = try? JSONDecoder().decode(Cfg.self, from: data) else {
@@ -199,6 +212,7 @@ public final class TTSConfigManager: ObservableObject {
                 if let m = legacy.mode { selectedMode = m }
                 if let v = legacy.voice { selectedModelFile = v }
                 if let s = legacy.sttModel { selectedSttModel = s }
+                if let language = legacy.sttLanguage { selectedSttLanguage = language }
                 needsRewrite = true
                 VBLog.models.info("migrated a pre-versioned config to schema \(Self.schemaVersion)")
             }
@@ -225,6 +239,8 @@ public final class TTSConfigManager: ObservableObject {
         if let m = cfg.mode { selectedMode = m }
         if let v = cfg.voice { selectedModelFile = v }
         if let s = cfg.sttModel { selectedSttModel = s }
+        // v2: additive optional field, so the schema version stays put.
+        if let language = cfg.sttLanguage { selectedSttLanguage = language }
 
         // v2: restore the custom model root, if the user picked one.
         if let root = cfg.root, !root.isEmpty {

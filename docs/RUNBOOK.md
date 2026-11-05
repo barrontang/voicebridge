@@ -56,6 +56,11 @@ place, so an interrupted download can never look like an installed model.
 
 Env overrides: `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_KOKORO`, `VOICEBRIDGE_EDGE_TTS`.
 
+**Tuning STT.** Settings → Speech-to-text: pick the whisper model **and the language**.
+Leaving the language on *Auto-detect* costs accuracy on short live windows (a 1–2 s
+fragment is not enough audio to identify the language, so an unpinned Chinese turn can
+come back as English). The CLI takes `--language zh|en|…` for the same reason.
+
 > **Privacy.** Edge TTS is always online. Drama 3 is online *only* when its
 > server is on another machine — a server on `127.0.0.1` keeps the text on this
 > Mac. The app asks for confirmation before the first remote send and shows a
@@ -170,7 +175,7 @@ clip length is known, otherwise `wallclock=…s` as a cost proxy.
 ## 4. Tests
 
 ```bash
-swift test                                        # 139 pure-logic tests, < 1 s
+swift test                                        # 143 pure-logic tests, < 1 s
 VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 

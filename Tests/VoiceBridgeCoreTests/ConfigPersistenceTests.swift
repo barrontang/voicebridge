@@ -34,6 +34,28 @@ final class ConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(second.selectedSttModel, .small)
     }
 
+    /// A pinned STT language is a user choice and must survive a relaunch;
+    /// auto-detect is the default, so `nil` must stay absent rather than
+    /// silently becoming a language.
+    func testTheSttLanguageIsPersistedAndRestored() throws {
+        let url = tempConfigURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = TTSConfigManager(persistURL: url)
+        XCTAssertNil(first.selectedSttLanguage, "auto-detect is the default")
+        first.selectedSttLanguage = "zh"
+        XCTAssertNotNil(first.persist())
+
+        let second = TTSConfigManager(persistURL: url)
+        XCTAssertEqual(second.selectedSttLanguage, "zh")
+
+        // …and clearing it back to auto survives too.
+        second.selectedSttLanguage = nil
+        XCTAssertNotNil(second.persist())
+        let third = TTSConfigManager(persistURL: url)
+        XCTAssertNil(third.selectedSttLanguage)
+    }
+
     func testCustomModelRootIsPersistedAndRestored() throws {
         let url = tempConfigURL()
         defer { try? FileManager.default.removeItem(at: url) }

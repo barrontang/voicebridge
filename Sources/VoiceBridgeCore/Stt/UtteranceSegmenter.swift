@@ -8,10 +8,18 @@ public struct UtteranceSegmenter: Sendable {
     public struct Config: Sendable {
         public var speechThreshold: Float = 0.012
         public var silenceThreshold: Float = 0.006  // hysteresis low-water
-        public var trailingSilence: TimeInterval = 0.6
+        /// Silence that closes an utterance.
+        ///
+        /// 0.6 s cut people off at ordinary clause boundaries, so whisper saw
+        /// fragments with no sentence context (the "live is less accurate than
+        /// push-to-talk" report). 1 s keeps a sentence together and is still
+        /// fast enough for captions.
+        public var trailingSilence: TimeInterval = 1.0
         public var minimumUtterance: TimeInterval = 0.25
-        public var maximumUtterance: TimeInterval = 15.0  // force-chunk monologues
-        public var leadIn: TimeInterval = 0.20  // pre-roll for context
+        /// Force-chunk monologues. 30 s matches whisper's own window, so a
+        /// long turn is decoded in one pass instead of two half sentences.
+        public var maximumUtterance: TimeInterval = 30.0
+        public var leadIn: TimeInterval = 0.30  // pre-roll for context
 
         public init() {}
     }

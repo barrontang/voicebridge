@@ -240,6 +240,10 @@ struct ContentView: View {
         .onChange(of: ttsConfig.selectedSttModel) {
             applySttModel(ttsConfig.selectedSttModel)
         }
+        // …and when the language does: the live session owns its copy.
+        .onChange(of: ttsConfig.selectedSttLanguage) {
+            applySttModel(ttsConfig.selectedSttModel)
+        }
         // A model was just downloaded (or removed): pick it up right away
         // instead of waiting for a restart.
         .onChange(of: ttsConfig.availableSttModels) {
@@ -488,7 +492,7 @@ struct ContentView: View {
                 let t = try await WhisperCliBackend(modelDirectory: ttsConfig.paths.whisperDir)
                     .transcribe(
                         audio: audioURL,
-                        language: nil,
+                        language: ttsConfig.selectedSttLanguage,
                         model: model,
                         useTimestamps: false)
                 lastPushToTalkTranscript = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -585,6 +589,7 @@ struct ContentView: View {
         live.apply(
             LiveSttSession.Configuration(
                 model: chosen ?? .tiny,
+                language: ttsConfig.selectedSttLanguage,
                 modelDirectory: ttsConfig.paths.whisperDir,
                 scratchDir: ttsConfig.paths.cacheDir,
                 // A local whisper.cpp server keeps the model resident - no

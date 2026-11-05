@@ -167,6 +167,17 @@ struct SettingsView: View {
                 }
                 .help("The whisper model used to transcribe speech.")
 
+                Picker("Language", selection: $ttsConfig.selectedSttLanguage) {
+                    Text("Auto-detect").tag(String?.none)
+                    ForEach(Self.sttLanguageChoices) { choice in
+                        Text(choice.label).tag(String?.some(choice.id))
+                    }
+                }
+                .help(
+                    "Pinning the language is much more accurate than auto-detect, "
+                        + "especially for live captions: a short window is not "
+                        + "enough audio to identify the language reliably.")
+
                 LabeledContent("On disk") {
                     Text(
                         ttsConfig.availableSttModels.count == 0
@@ -355,6 +366,26 @@ struct SettingsView: View {
     }
 
     /// The picker label, annotated with whether the model is on disk.
+    private struct SttLanguageChoice: Identifiable {
+        let id: String
+        let label: String
+    }
+
+    /// whisper's language codes, most likely first. `nil` (auto) stays the
+    /// default so nothing changes for a user who never opens this picker.
+    private static let sttLanguageChoices: [SttLanguageChoice] = [
+        SttLanguageChoice(id: "zh", label: "Chinese · 中文"),
+        SttLanguageChoice(id: "en", label: "English"),
+        SttLanguageChoice(id: "ja", label: "Japanese · 日本語"),
+        SttLanguageChoice(id: "ko", label: "Korean · 한국어"),
+        SttLanguageChoice(id: "es", label: "Spanish"),
+        SttLanguageChoice(id: "fr", label: "French"),
+        SttLanguageChoice(id: "de", label: "German"),
+        SttLanguageChoice(id: "ru", label: "Russian"),
+        SttLanguageChoice(id: "pt", label: "Portuguese"),
+        SttLanguageChoice(id: "it", label: "Italian"),
+    ]
+
     private func sttModelLabel(_ m: SttModel) -> String {
         let onDisk = ttsConfig.availableSttModels.contains(m)
         let marker = onDisk ? "" : "  (not downloaded)"

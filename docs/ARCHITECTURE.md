@@ -94,8 +94,13 @@ word matching. That is O(n²), re-words earlier segments and leaks fragments.
 The current pipeline is:
 
 1. **VAD segmentation** (`UtteranceSegmenter`) — energy + zero-crossing with
-   hysteresis splits the stream into utterances (a pause closes one, a 15 s
-   cap closes a monologue).
+   hysteresis splits the stream into utterances (1 s of silence closes one,
+   a 30 s cap closes a monologue). Both numbers are accuracy settings, not
+   latency knobs: 0.6 s cut people off mid-clause and 15 s split long turns
+   at an arbitrary point.
+   Each pass is then handed `overlapSeconds` (0.8 s) of already-heard audio as
+   **left context**, clamped to the last committed audio so a 30 s hard cut
+   never re-transcribes speech the transcript already covers.
 2. **Timed segments** (`WhisperTranscriptParser`) — whisper's JSON carries
    per-segment `offsets`; they are parsed and shifted into the window's
    absolute time base.

@@ -137,11 +137,12 @@ final class UtteranceSegmenterTests: XCTestCase {
         XCTAssertNotNil(seg.currentUtteranceID)
         XCTAssertNotNil(seg.currentUtteranceStart)
 
-        // Quiet frames close it after the trailing silence elapses.
+        // Quiet frames close it once a full second of silence has elapsed
+        // (the threshold used to be 0.6 s, which cut sentences mid-clause).
         let quiet = AudioFrame(
             samples: [Float](repeating: 0.0, count: 1600),
             startTime: 0.1, sequence: 1)
-        for _ in 0..<8 { boundaries += seg.consume(quiet) }
+        for _ in 0..<12 { boundaries += seg.consume(quiet) }
         let ended = boundaries.compactMap { b -> Range<TimeInterval>? in
             if case .ended(let r) = b { return r } else { return nil }
         }
@@ -157,6 +158,37 @@ final class UtteranceSegmenterTests: XCTestCase {
         let boundaries = seg.consume(mid)
         XCTAssertTrue(boundaries.isEmpty)
         XCTAssertNil(seg.currentUtteranceID)
+    }
+
+    /// An ordinary clause pause must not cut the sentence in half.
+    ///
+    /// The old 0.6 s threshold closed the utterance while the speaker was
+    /// still mid-sentence, so whisper decoded fragments with no context.
+    func testAnOrdinaryClausePauseDoesNotEndTheUtterance() {
+        var seg = UtteranceSegmenter()
+        var t = 0.0
+        func frame(_ rms: Float) -> AudioFrame {
+            defer { t += 0.1 }
+            return AudioFrame(
+                samples: [Float](repeating: rms, count: 1600), startTime: t,
+                sequence: UInt64(t * 10_000))
+        }
+        // 1 s of speech opens it.
+        for _ in 0..<10 { _ = seg.consume(frame(0.5)) }
+        XCTAssertNotNil(seg.currentUtteranceStart)
+
+        // 0.8 s of silence: under the old threshold this closed the utterance.
+        var boundaries: [UtteranceSegmenter.Boundary] = []
+        for _ in 0..<8 { boundaries += seg.consume(frame(0.0)) }
+        XCTAssertFalse(
+            boundaries.contains { if case .ended = $0 { return true } else { return false } },
+            "0.8 s of silence must not end the sentence anymore")
+        XCTAssertNotNil(seg.currentUtteranceStart)
+
+        // A full second does close it.
+        for _ in 0..<3 { boundaries += seg.consume(frame(0.0)) }
+        XCTAssertTrue(
+            boundaries.contains { if case .ended = $0 { return true } else { return false } })
     }
 
     func testFlushForceClosesOpenUtterance() {
