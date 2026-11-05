@@ -170,12 +170,35 @@ clip length is known, otherwise `wallclock=…s` as a cost proxy.
 ## 4. Tests
 
 ```bash
-swift test                                        # 94 pure-logic tests, < 1 s
+swift test                                        # 137 pure-logic tests, < 1 s
 VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 
 Audio/shell paths are integration-tested by `voicebridge-cli`
 (`ping`/`stt`/`tts`), not by the unit tests.
+
+### Formatting
+
+The tree is formatted with `swift-format` and CI enforces it:
+
+```bash
+xcrun swift-format format --in-place --recursive \
+  --configuration .swift-format Sources App Tests Package.swift
+```
+
+Run that before pushing; `lint --strict` is the CI gate.
+
+### Maintaining the model catalog
+
+`ModelCatalog` carries a size and a SHA-256 per model, and the downloader only
+verifies a checksum when the entry has one — a missing value silently disables
+the integrity check. Upstream re-uploads happen, so verify after touching the
+catalog (also a CI step):
+
+```bash
+scripts/verify-catalog.sh          # HEAD-only; compares size + sha256
+scripts/verify-catalog.sh --fix    # prints the current values to paste in
+```
 
 ## 5. Audio input
 

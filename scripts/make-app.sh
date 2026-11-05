@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # The version comes from the VERSION file (single source of truth).
-VERSION="$(cat VERSION 2>/dev/null || echo "1.1.0")"
+VERSION="$(cat VERSION 2>/dev/null || echo "1.2.0")"
 
 swift build -c "$CONFIG"
 BIN=".build/$CONFIG/voicebridge-gui"

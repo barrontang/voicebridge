@@ -21,7 +21,8 @@ VoiceBridgeCore     (SPM library, no SwiftUI/UIKit, @testable)
     │               LiveTranscriptEngine, UtteranceSegmenter,
     │               TranscriptReconciler, AudioRingBuffer,
     │               LiveSttSession, PushToTalkSession
-    ├── Tts/        TTSBackend + Piper/Kokoro/EdgeTTS/System backends,
+    ├── Tts/        TTSBackend + Piper/Kokoro/EdgeTTS/FishAudio/System backends,
+    │               EnginePrivacy (the one "does it leave the Mac?" answer),
     │               TTSManager (orchestration), TTSConfigManager (state),
     │               Playback, CacheGuardian, Pipeline
     ├── DI/         VoiceBridgeEnvironment, ModelPaths, BinaryLocator, AppPaths,

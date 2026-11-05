@@ -41,10 +41,12 @@
     Apple Silicon (~27 GB peak), or against a GPU server (asks before sending).
   - **AVSpeechSynthesizer** — built-in system voice, always-available fallback.
 - **⬇️ One-click model install** — download whisper models and Piper voices from the Settings page
-  (progress, disk-space check, checksum, crash-safe writes). No terminal required.
+  (progress, disk-space check, SHA-256 verification, crash-safe writes). The catalog's
+  checksums and sizes are re-verified against the server in CI (`scripts/verify-catalog.sh`).
+  No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  127 unit tests run in CI in under a second.
+  137 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -149,10 +151,10 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 94 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 137 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
-| `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) |
-| `scripts/` | `build.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` |
+| `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
+| `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `verify-catalog.sh` |
 | `skills/voicebridge-tts/` | An agent skill: pipe any text into `voicebridge-cli tts`. |
 
 ---
@@ -206,21 +208,38 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
   before the first send and shows a notice in the status line. A Drama 3 server on
   `127.0.0.1` keeps the text on this Mac and needs no consent; a server on another
   machine does. Edge TTS receives the text through a private temp file (never on the
-  command line).
+  command line). "Does this engine transmit?" is answered in exactly one place
+  (`EnginePrivacy`), so the app, the Settings page and the CLI cannot disagree.
+- The **CLI** has no UI to ask, so it prints the same warning on stderr for *any* engine
+  that transmits — including a remote Drama 3 server, which used to pass silently.
 - Settings live in `~/Library/Application Support/VoiceBridge/config.json` — no telemetry,
   no analytics, no network calls of any kind.
+
+### A note on the `VOICEBRIDGE_*` overrides
+
+`WHISPER_CLI`, `VOICEBRIDGE_PIPER`, `VOICEBRIDGE_EDGE_TTS`, `VOICEBRIDGE_KOKORO`,
+`VOICEBRIDGE_FISH_TTS` and `AFPLAY` all accept an absolute path to a binary or server. That is
+a deliberate seam for development, and it is also a path-hijack vector if someone else can set
+your environment — don't launch VoiceBridge from a wrapper you don't trust.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome!
+Contributions are welcome! Start with [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) —
+the local loop, the CI gates, the conventions a review will check, and the
+prioritised list of what to build next.
+
+```bash
+scripts/dev-check.sh        # every gate CI runs, in CI order
+```
 
 ### Adding a new TTS engine
 1. Implement the `TTSBackend` protocol in `Sources/VoiceBridgeCore/Tts/`.
-2. Register it in `TTSManager.defaultEngineFactory`.
-3. Add a test in `Tests/VoiceBridgeCoreTests/`.
-4. Open a PR 👋
+2. Add a stable-slug case to `TTSMode`, then register it in `TTSManager.defaultEngineFactory`.
+3. Answer "does it transmit?" in `EnginePrivacy` — nowhere else.
+4. Add a test in `Tests/VoiceBridgeCoreTests/`.
+5. Open a PR 👋
 
 ### Adding a new STT engine
 1. Implement `WhisperBackend` (file-based) or `StreamingWhisperBackend` (streaming).
@@ -245,6 +264,9 @@ Contributions are welcome!
 - [ ] Voice cloning (XTTS-v2 / Kokoro) behind `TTSBackend`
 - [ ] Localization (the UI is small; a String Catalog is a mechanical follow-up)
 - [ ] Notarized release build (the workflow is in `.github/workflows/release.yml`)
+
+Each item above has an entry point and a definition of done in
+[`docs/DEVELOPMENT.md` §7](docs/DEVELOPMENT.md#7-what-to-build-next).
 
 ---
 
