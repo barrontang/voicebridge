@@ -170,7 +170,7 @@ clip length is known, otherwise `wallclock=…s` as a cost proxy.
 ## 4. Tests
 
 ```bash
-swift test                                        # 137 pure-logic tests, < 1 s
+swift test                                        # 139 pure-logic tests, < 1 s
 VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 

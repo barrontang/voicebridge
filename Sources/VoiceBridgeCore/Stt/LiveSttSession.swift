@@ -171,7 +171,7 @@ public final class LiveSttSession: ObservableObject {
         let backend = WindowedWhisperAdapter(
             fileBackend: fileBackend,
             scratchDir: config.scratchDir)
-        let engineConfig = LiveTranscriptEngine.Config()
+        let engineConfig = config.engineConfig
         let engine = LiveTranscriptEngine(backend: backend, config: engineConfig)
         let viewModel = LiveTranscriptViewModel(engine: engine)
         self.engine = engine
@@ -255,6 +255,25 @@ public final class LiveSttSession: ObservableObject {
                 }
             }
         }
+    }
+}
+
+extension LiveSttSession.Configuration {
+
+    /// The live engine's configuration, derived from this session's settings.
+    ///
+    /// `startPipeline` used to build a fresh `LiveTranscriptEngine.Config()`,
+    /// so the model the user picked (and the partial cadence, window and ring
+    /// size) never reached the engine: live captions always ran the hard-coded
+    /// `large-v3-turbo` default no matter what Settings said. Deriving it here
+    /// keeps the mapping testable without a microphone.
+    public var engineConfig: LiveTranscriptEngine.Config {
+        var config = LiveTranscriptEngine.Config()
+        config.model = model.rawValue
+        config.partialInterval = partialInterval
+        config.windowSeconds = windowSeconds
+        config.ringBufferSeconds = ringBufferSeconds
+        return config
     }
 }
 

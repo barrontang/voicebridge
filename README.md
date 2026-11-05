@@ -46,7 +46,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  137 unit tests run in CI in under a second.
+  139 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -151,7 +151,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 137 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 139 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
 | `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `verify-catalog.sh` |

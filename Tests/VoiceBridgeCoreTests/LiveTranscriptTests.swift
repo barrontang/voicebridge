@@ -172,3 +172,34 @@ final class UtteranceSegmenterTests: XCTestCase {
         XCTAssertEqual(range.upperBound, 2.0, accuracy: 0.001)
     }
 }
+
+// MARK: - Live session ↔ engine wiring
+
+final class LiveSessionConfigurationTests: XCTestCase {
+
+    /// The engine must run the model the user picked.
+    ///
+    /// `startPipeline` used to build a fresh `LiveTranscriptEngine.Config()`
+    /// and ignore the session's configuration, so live captions silently ran
+    /// the hard-coded `large-v3-turbo` default even after the user selected
+    /// `large-v3` for push-to-talk — the same audio, transcribed by two
+    /// different models, which is exactly the "live is less accurate" report.
+    func testTheConfiguredModelReachesTheEngine() {
+        let configuration = LiveSttSession.Configuration(
+            model: .largeV3,
+            partialInterval: 0.4,
+            windowSeconds: 6,
+            ringBufferSeconds: 30)
+
+        let engine = configuration.engineConfig
+        XCTAssertEqual(engine.model, "large-v3", "the live engine must honour the chosen model")
+        XCTAssertEqual(engine.partialInterval, 0.4)
+        XCTAssertEqual(engine.windowSeconds, 6)
+        XCTAssertEqual(engine.ringBufferSeconds, 30)
+    }
+
+    /// The default is still the recommended turbo model.
+    func testTheDefaultConfigurationIsTurbo() {
+        XCTAssertEqual(LiveSttSession.Configuration().engineConfig.model, "large-v3-turbo")
+    }
+}
