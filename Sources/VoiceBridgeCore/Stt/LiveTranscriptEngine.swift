@@ -28,6 +28,8 @@ public actor LiveTranscriptEngine {
 
     private let backend: any StreamingWhisperBackend
     private let config: Config
+    /// Optional post-ASR fixer; `nil` keeps the raw whisper text.
+    private let corrector: (any TranscriptCorrector)?
 
     private var ring = AudioRingBuffer(capacitySeconds: 60)
     private var segmenter = UtteranceSegmenter()
@@ -50,13 +52,26 @@ public actor LiveTranscriptEngine {
     private var partialInFlight = false
     private var partialPending = false
     private var finalTask: Task<Void, Never>?
+
+    // Contextual correction (opt-in). One request in flight at a time; the
+    // queue is tiny because a stalled model must not build a backlog.
+    private var correctionTask: Task<Void, Never>?
+    private var correctionRunning = false
+    private var correctionQueue: [(segment: TranscriptSegment, context: [String])] = []
+    /// The committed texts, for the corrector's context window.
+    private var committedTexts: [String] = []
     private var pendingFinals: [(range: Range<TimeInterval>, utteranceID: UUID?)] = []
 
     private var continuation: AsyncStream<TranscriptEvent>.Continuation?
 
-    public init(backend: any StreamingWhisperBackend, config: Config = Config()) {
+    public init(
+        backend: any StreamingWhisperBackend,
+        config: Config = Config(),
+        corrector: (any TranscriptCorrector)? = nil
+    ) {
         self.backend = backend
         self.config = config
+        self.corrector = corrector
         self.ring = AudioRingBuffer(capacitySeconds: config.ringBufferSeconds)
     }
 
@@ -82,6 +97,9 @@ public actor LiveTranscriptEngine {
         hasSeenAudio = false
         partialInFlight = false
         partialPending = false
+        correctionQueue.removeAll()
+        correctionRunning = false
+        committedTexts.removeAll()
         reconciler.reset()
         ring = AudioRingBuffer(capacitySeconds: config.ringBufferSeconds)
         segmenter = UtteranceSegmenter()
@@ -129,6 +147,10 @@ public actor LiveTranscriptEngine {
         partialTask = nil
         partialInFlight = false
         partialPending = false
+        correctionTask?.cancel()
+        correctionTask = nil
+        correctionRunning = false
+        correctionQueue.removeAll()
         finalTask?.cancel()
         finalTask = nil
         pendingFinals.removeAll()
@@ -282,7 +304,7 @@ public actor LiveTranscriptEngine {
                     language: config.language,
                     hint: .final
                 )
-                await apply(
+                let committed = await apply(
                     segments: segments,
                     windowRange: range,
                     windowIndex: idx,
@@ -290,6 +312,9 @@ public actor LiveTranscriptEngine {
                     isFinal: true)
                 // Only now may the next window's pre-roll stop at this point.
                 committedEnd = max(committedEnd, range.upperBound)
+                for case .final(let segment) in committed {
+                    enqueueCorrection(for: segment)
+                }
                 VBLog.engine.info(
                     "live final \(range.lowerBound, privacy: .public)s..\(range.upperBound, privacy: .public)s → \(segments.count, privacy: .public) segment(s)"
                 )
@@ -306,13 +331,14 @@ public actor LiveTranscriptEngine {
 
     // MARK: - Shared
 
+    @discardableResult
     private func apply(
         segments: [TranscriptSegment],
         windowRange: Range<TimeInterval>,
         windowIndex: Int,
         utteranceID: UUID?,
         isFinal: Bool
-    ) async {
+    ) async -> [TranscriptEvent] {
         let events = reconciler.ingest(
             segments: segments,
             windowRange: windowRange,
@@ -321,10 +347,70 @@ public actor LiveTranscriptEngine {
             isFinal: isFinal
         )
         for e in events { continuation?.yield(e) }
+        return events
     }
 
     private func emitGap(_ range: Range<TimeInterval>) {
         continuation?.yield(.gap(range))
+    }
+
+    // MARK: - Contextual correction
+
+    /// Queue a committed sentence for post-ASR correction.
+    ///
+    /// The context is the last three committed sentences: enough to resolve a
+    /// homophone or a name, short enough to keep a 4B model fast.
+    private func enqueueCorrection(for segment: TranscriptSegment) {
+        guard corrector != nil, !segment.text.isEmpty else { return }
+        let context = Array(committedTexts.suffix(3))
+        committedTexts.append(segment.text)
+        if committedTexts.count > 20 {
+            committedTexts.removeFirst(committedTexts.count - 20)
+        }
+        correctionQueue.append((segment, context))
+        guard !correctionRunning else { return }
+        correctionRunning = true
+        correctionTask = Task { [weak self] in
+            await self?.drainCorrections()
+        }
+    }
+
+    private func drainCorrections() async {
+        defer { correctionRunning = false }
+        guard let corrector else { return }
+        while !correctionQueue.isEmpty, isRunning, !Task.isCancelled {
+            let job = correctionQueue.removeFirst()
+            do {
+                guard
+                    let corrected = try await corrector.correct(
+                        sentence: job.segment.text, context: job.context)
+                else { continue }
+                let decision = CorrectionPolicy.evaluate(
+                    original: job.segment.text, corrected: corrected)
+                guard decision.accepted else {
+                    VBLog.engine.debug(
+                        "live correction rejected (\(decision.reason, privacy: .public))")
+                    continue
+                }
+                let revised = TranscriptSegment(
+                    id: job.segment.id,
+                    text: corrected.trimmingCharacters(in: .whitespacesAndNewlines),
+                    range: job.segment.range,
+                    stability: .stable,
+                    confidence: job.segment.confidence,
+                    windowIndex: job.segment.windowIndex,
+                    utteranceID: job.segment.utteranceID)
+                continuation?.yield(.revision(revised))
+                VBLog.engine.info(
+                    "live correction applied to \(job.segment.id.uuidString.prefix(8), privacy: .public)"
+                )
+            } catch {
+                // Ollama not running, model missing, timeout: keep whisper's
+                // words and say so once, at info level.
+                VBLog.engine.info(
+                    "live correction skipped: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// The audio for one pass: `overlapSeconds` of already-heard audio in

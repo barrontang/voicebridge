@@ -47,6 +47,8 @@ public final class LiveSttSession: ObservableObject {
         public var windowSeconds: TimeInterval
         /// How much audio the engine keeps for the segmenter.
         public var ringBufferSeconds: TimeInterval
+        /// Optional post-ASR corrector (local LLM). `nil` = plain whisper.
+        public var corrector: (any TranscriptCorrector)?
         /// The URL of a local whisper.cpp server. When set, the live path
         /// talks to it instead of spawning `whisper-cli` per window (the
         /// model stays resident - no process spawn, no model load).
@@ -60,7 +62,8 @@ public final class LiveSttSession: ObservableObject {
             partialInterval: TimeInterval = 1.2,
             windowSeconds: TimeInterval = 4.0,
             ringBufferSeconds: TimeInterval = 60.0,
-            serverURL: URL? = nil
+            serverURL: URL? = nil,
+            corrector: (any TranscriptCorrector)? = nil
         ) {
             self.model = model
             self.language = language
@@ -70,6 +73,7 @@ public final class LiveSttSession: ObservableObject {
             self.windowSeconds = windowSeconds
             self.ringBufferSeconds = ringBufferSeconds
             self.serverURL = serverURL
+            self.corrector = corrector
         }
     }
 
@@ -193,7 +197,8 @@ public final class LiveSttSession: ObservableObject {
             fileBackend: fileBackend,
             scratchDir: config.scratchDir)
         let engineConfig = config.engineConfig
-        let engine = LiveTranscriptEngine(backend: backend, config: engineConfig)
+        let engine = LiveTranscriptEngine(
+            backend: backend, config: engineConfig, corrector: config.corrector)
         let viewModel = LiveTranscriptViewModel(engine: engine)
         self.engine = engine
         self.viewModel = viewModel

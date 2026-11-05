@@ -256,6 +256,12 @@ struct ContentView: View {
         .onChange(of: ttsConfig.selectedSttLanguage) {
             applySttModel(ttsConfig.selectedSttModel)
         }
+        .onChange(of: ttsConfig.correctionEnabled) {
+            applySttModel(ttsConfig.selectedSttModel)
+        }
+        .onChange(of: ttsConfig.correctionModel) {
+            applySttModel(ttsConfig.selectedSttModel)
+        }
         // A model was just downloaded (or removed): pick it up right away
         // instead of waiting for a restart.
         .onChange(of: ttsConfig.availableSttModels) {
@@ -608,6 +614,10 @@ struct ContentView: View {
                 scratchDir: ttsConfig.paths.cacheDir,
                 // A local whisper.cpp server keeps the model resident - no
                 // process spawn per window.
-                serverURL: WhisperServerBackend.fromEnvironment()?.baseURL))
+                serverURL: WhisperServerBackend.fromEnvironment()?.baseURL,
+                // Contextual correction is opt-in and loopback-only.
+                corrector: ttsConfig.correctionEnabled
+                    ? LocalLLMCorrector(model: ttsConfig.correctionModel)
+                    : nil))
     }
 }

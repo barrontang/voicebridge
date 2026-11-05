@@ -178,6 +178,34 @@ struct SettingsView: View {
                         + "especially for live captions: a short window is not "
                         + "enough audio to identify the language reliably.")
 
+                Toggle(
+                    "Contextual correction (local LLM)",
+                    isOn: $ttsConfig.correctionEnabled
+                )
+                .help(
+                    "After each live sentence, a local model fixes only the words "
+                        + "whisper misheard, using the preceding sentences as context.")
+
+                HStack(spacing: 8) {
+                    Text("Ollama model")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("qwen3.5:4b", text: $ttsConfig.correctionModel)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!ttsConfig.correctionEnabled)
+                        .frame(maxWidth: 220)
+                }
+
+                Text(
+                    "Text — never audio — is sent to a model on this Mac "
+                        + "(127.0.0.1:11434). If Ollama is not running, captions "
+                        + "simply keep whisper's words. Corrections never rewrite a "
+                        + "sentence: only misheard words are replaced, and a change "
+                        + "that rewrites too much is rejected."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
                 LabeledContent("On disk") {
                     Text(
                         ttsConfig.availableSttModels.count == 0

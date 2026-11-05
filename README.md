@@ -29,6 +29,9 @@
   - **Live captions**: word-by-word, VAD-segmented utterances, committed once and never re-worded.
     Live uses the same model you picked, a pinned language, and 0.8 s of left context per
     window — the three things that made it read worse than push-to-talk before.
+  - **Contextual correction** (opt-in): a local Ollama model fixes only the words whisper
+    misheard, using the preceding sentences. Word-level, guarded, and it never rewrites a
+    sentence — a change that edits too much is rejected and the raw text stays.
   - **Push-to-talk**: record a clip, transcribe it.
   - **Any input format**: mp3, m4a, aiff, wav, … are transcoded to whisper's shape automatically.
   - **Batch mode**: transcribe a whole folder from the CLI.
@@ -48,7 +51,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  143 unit tests run in CI in under a second.
+  161 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -153,7 +156,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 143 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 161 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
@@ -215,6 +218,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
   (`EnginePrivacy`), so the app, the Settings page and the CLI cannot disagree.
 - The **CLI** has no UI to ask, so it prints the same warning on stderr for *any* engine
   that transmits — including a remote Drama 3 server, which used to pass silently.
+- Contextual correction sends **text** (not audio) to Ollama on `127.0.0.1:11434`, and only
+  when you turn it on. If Ollama is not running, captions keep whisper's words.
 - Settings live in `~/Library/Application Support/VoiceBridge/config.json` — no telemetry,
   no analytics, no network calls of any kind.
 

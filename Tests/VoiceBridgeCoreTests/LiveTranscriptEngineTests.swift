@@ -168,6 +168,7 @@ final class LiveTranscriptEngineTests: XCTestCase {
         }
 
         let box = Box()
+        var text = "sentence"
 
         func transcribe(
             samples: [Float], sampleRate: Double, startTime: TimeInterval,
@@ -179,7 +180,7 @@ final class LiveTranscriptEngineTests: XCTestCase {
             }
             return [
                 TranscriptSegment(
-                    text: "sentence",
+                    text: text,
                     range: startTime..<(startTime + duration),
                     stability: hint == .final ? .stable : .volatile)
             ]
@@ -344,6 +345,91 @@ final class LiveTranscriptEngineTests: XCTestCase {
                     range: startTime..<(startTime + duration),
                     stability: hint == .final ? .stable : .volatile)
             ]
+        }
+    }
+
+    // MARK: - Contextual correction
+
+    private struct FakeCorrector: TranscriptCorrector {
+        let replacement: String
+        func correct(sentence: String, context: [String]) async throws -> String? {
+            replacement
+        }
+    }
+
+    /// A committed sentence is corrected in place: same id, same range, new
+    /// words, and it is never appended as a second segment.
+    func testAnAcceptedCorrectionRevisesTheCommittedSegment() async throws {
+        let backend = RecordingFinalBackend(text: "the meeting is at tree")
+        var config = LiveTranscriptEngine.Config()
+        config.partialInterval = 10
+        config.ringBufferSeconds = 30
+
+        let engine = LiveTranscriptEngine(
+            backend: backend,
+            config: config,
+            corrector: FakeCorrector(replacement: "the meeting is at three"))
+        let stream = await engine.start()
+        let collector = RevisionCollector()
+        let drain = Task { for await e in stream { await collector.add(e) } }
+        defer { drain.cancel() }
+
+        var t = 0.0
+        await feed(engine, rms: 0.5, count: 10, t: &t)
+        await feed(engine, rms: 0.0, count: 12, t: &t)
+        // Give the correction task time to run (it is async by design).
+        try? await Task.sleep(for: .milliseconds(400))
+        await engine.stop()
+        drain.cancel()
+
+        let finals = await collector.finals
+        let revisions = await collector.revisions
+        XCTAssertEqual(finals.count, 1)
+        XCTAssertEqual(revisions.count, 1, "one sentence → at most one correction")
+        let final = try XCTUnwrap(finals.first)
+        let revised = try XCTUnwrap(revisions.first)
+        XCTAssertEqual(revised.id, final.id, "a revision replaces the segment, never adds one")
+        XCTAssertEqual(revised.range, final.range, "timings must not move")
+        XCTAssertEqual(revised.text, "the meeting is at three")
+    }
+
+    /// A correction that rewrites the sentence is dropped and the transcript
+    /// keeps whisper's words.
+    func testARejectedCorrectionLeavesTheTranscriptAlone() async throws {
+        let backend = RecordingFinalBackend(text: "the cat sat on the mat")
+        var config = LiveTranscriptEngine.Config()
+        config.partialInterval = 10
+        config.ringBufferSeconds = 30
+
+        let engine = LiveTranscriptEngine(
+            backend: backend,
+            config: config,
+            corrector: FakeCorrector(replacement: "a completely different sentence"))
+        let stream = await engine.start()
+        let collector = RevisionCollector()
+        let drain = Task { for await e in stream { await collector.add(e) } }
+        defer { drain.cancel() }
+
+        var t = 0.0
+        await feed(engine, rms: 0.5, count: 10, t: &t)
+        await feed(engine, rms: 0.0, count: 12, t: &t)
+        try? await Task.sleep(for: .milliseconds(400))
+        await engine.stop()
+        drain.cancel()
+
+        let revisions = await collector.revisions
+        XCTAssertTrue(revisions.isEmpty, "the policy must reject a rewrite")
+    }
+
+    private actor RevisionCollector {
+        private(set) var finals: [TranscriptSegment] = []
+        private(set) var revisions: [TranscriptSegment] = []
+        func add(_ event: TranscriptEvent) {
+            switch event {
+            case .final(let s): finals.append(s)
+            case .revision(let s): revisions.append(s)
+            default: break
+            }
         }
     }
 

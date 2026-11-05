@@ -52,6 +52,17 @@ public final class TTSConfigManager: ObservableObject {
     @Published public var selectedSttLanguage: String? = nil {
         didSet { persist() }
     }
+    /// Fix mis-heard words after each live sentence, using a local LLM.
+    ///
+    /// Off by default: it costs a model call per sentence and only makes sense
+    /// when Ollama is installed. Text (never audio) goes to loopback.
+    @Published public var correctionEnabled: Bool = false {
+        didSet { persist() }
+    }
+    /// The Ollama model used for the correction pass.
+    @Published public var correctionModel: String = LocalLLMCorrector.defaultModel {
+        didSet { persist() }
+    }
     /// whisper models physically present under `whisperDir` (refreshed by `scan()`).
     @Published public private(set) var availableSttModels: [SttModel] = []
 
@@ -146,6 +157,8 @@ public final class TTSConfigManager: ObservableObject {
             let sttModel: SttModel?
             /// Optional whisper language code; `nil` = auto-detect per window.
             let sttLanguage: String?
+            let correctionEnabled: Bool?
+            let correctionModel: String?
             /// v2: the user's custom model root (the default location when nil).
             let root: String?
         }
@@ -155,6 +168,8 @@ public final class TTSConfigManager: ObservableObject {
             voice: selectedModelFile,
             sttModel: selectedSttModel,
             sttLanguage: selectedSttLanguage,
+            correctionEnabled: correctionEnabled,
+            correctionModel: correctionModel,
             root: modelRoot.path)
         do {
             let data = try JSONEncoder().encode(cfg)
@@ -196,6 +211,8 @@ public final class TTSConfigManager: ObservableObject {
             let voice: String?
             let sttModel: SttModel?
             let sttLanguage: String?
+            let correctionEnabled: Bool?
+            let correctionModel: String?
             let root: String?
         }
         struct CfgLegacy: Decodable {  // schemaVersion 0 / pre-versioning
@@ -239,8 +256,10 @@ public final class TTSConfigManager: ObservableObject {
         if let m = cfg.mode { selectedMode = m }
         if let v = cfg.voice { selectedModelFile = v }
         if let s = cfg.sttModel { selectedSttModel = s }
-        // v2: additive optional field, so the schema version stays put.
+        // v2: additive optional fields, so the schema version stays put.
         if let language = cfg.sttLanguage { selectedSttLanguage = language }
+        if let enabled = cfg.correctionEnabled { correctionEnabled = enabled }
+        if let model = cfg.correctionModel, !model.isEmpty { correctionModel = model }
 
         // v2: restore the custom model root, if the user picked one.
         if let root = cfg.root, !root.isEmpty {

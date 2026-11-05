@@ -62,6 +62,11 @@ public final class LiveTranscriptViewModel: ObservableObject {
             }
             committed.append(s)
             committed.sort { $0.range.lowerBound < $1.range.lowerBound }
+        case .revision(let s):
+            // Same id, same range, new words: replace, never append.
+            if let i = committed.firstIndex(where: { $0.id == s.id }) {
+                committed[i] = s
+            }
         case .gap:
             // The engine could not transcribe this window; the UI shows a
             // hint instead of an empty screen.

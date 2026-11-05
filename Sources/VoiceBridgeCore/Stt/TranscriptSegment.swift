@@ -39,6 +39,10 @@ public struct TranscriptSegment: Sendable, Identifiable, Equatable {
 public enum TranscriptEvent: Sendable {
     case partial(TranscriptSegment)  // replace segment with same id
     case final(TranscriptSegment)  // promote; never changes again
+    /// Word-level correction of an already-committed segment (same `id`,
+    /// `range` and `utteranceID`); only its `text` differs. Emitted by the
+    /// contextual corrector, and only when `CorrectionPolicy` accepts it.
+    case revision(TranscriptSegment)
     case gap(Range<TimeInterval>)  // audio dropped (backpressure / reset)
     case finished
 }

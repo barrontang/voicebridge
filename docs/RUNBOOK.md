@@ -28,6 +28,20 @@ Model files land in `~/.voicebridge/models/tts/whisper/ggml-<model>.bin`
 > flags fall back to stdout; a non-zero exit caused *only* by an unrecognised
 > flag is retried without it, so genuine transcription errors still surface.
 
+**Contextual correction (optional).** After each live sentence, a small local model can fix
+the words whisper misheard ("tree" → "three") using the preceding sentences:
+
+```bash
+ollama pull qwen3.5:4b          # ~4 GB, runs on the GPU
+# Settings → Speech-to-text → "Contextual correction (local LLM)" → on
+```
+
+Text only, to `127.0.0.1:11434`; audio never leaves the Mac. The model is asked to fix
+misheard words and nothing else, and every answer is diffed against the ASR sentence — a
+correction that rewrites more than a third of it, changes language, or changes length by
+more than 0.6–1.5× is discarded. On a 4B model a correction takes ~0.2 s and never blocks
+the caption.
+
 **Server mode (faster live captions).** `whisper.cpp` ships a server that
 keeps the model resident, so the live path does not spawn a process per
 window:
@@ -175,7 +189,7 @@ clip length is known, otherwise `wallclock=…s` as a cost proxy.
 ## 4. Tests
 
 ```bash
-swift test                                        # 143 pure-logic tests, < 1 s
+swift test                                        # 161 pure-logic tests, < 1 s
 VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 

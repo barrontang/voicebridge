@@ -118,6 +118,22 @@ The current pipeline is:
 The partial pass covers the **open utterance** (from its start to now), so the
 caption reads as a sentence instead of an arbitrary trailing window.
 
+## Contextual correction (opt-in, local)
+
+Whisper has no memory: a homophone or a merged word is committed as-is. When the optional
+corrector is on, each committed sentence is sent — with the previous three sentences — to a
+local Ollama model (`think: false`, native `/api/chat`), and the answer is applied as a
+**word-level revision**:
+
+* `WordDiff` measures the change with a token Levenshtein distance (characters for CJK, which
+  has no spaces), giving a changed-ratio rather than a new string.
+* `CorrectionPolicy` rejects anything that smells like a paraphrase: more than 34 % of the
+  sentence changed, a language/script switch, or a length outside 0.6–1.5×.
+* An accepted correction becomes a `.revision` event carrying the **same id and range**, so
+  the view model replaces one committed segment in place; nothing after it moves.
+* One request in flight at a time, 6 s timeout, failures are silent (captions keep whisper's
+  words) and logged at info level.
+
 ## Process execution: one hardened runner
 
 `Shell.run` and `Pipeline.runWithStdin` were duplicated and shared the same
