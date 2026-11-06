@@ -10,9 +10,14 @@ final class CoreTests: XCTestCase {
     func testSttModelLabelsAndFilenames() {
         XCTAssertEqual(SttModel.largeV3Turbo.ggmlFilename, "ggml-large-v3-turbo.bin")
         XCTAssertTrue(SttModel.largeV3Turbo.label.contains("RECOMMENDED"))
-        // tiny, base, small, medium, large-v3-turbo, large-v3
-        XCTAssertEqual(SttModel.allCases.count, 6)
+        // tiny, base, small, medium, large-v3-turbo, large-v3, belle-zh
+        XCTAssertEqual(SttModel.allCases.count, 7)
         XCTAssertEqual(SttModel.largeV3.ggmlFilename, "ggml-large-v3.bin")
+        // The Chinese fine-tune is saved under the whisper naming the backend
+        // looks for, not the repo's generic `ggml-model.bin`.
+        XCTAssertEqual(
+            SttModel.belleTurboZh.ggmlFilename, "ggml-belle-large-v3-turbo-zh.bin")
+        XCTAssertTrue(SttModel.belleTurboZh.label.contains("中文"))
     }
 
     func testTTSModes() {

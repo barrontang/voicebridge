@@ -144,8 +144,11 @@ struct ContentView: View {
                             Label(pushToTalkTitle, systemImage: pushToTalkIcon)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(live.isRunning || pushToTalkDisabled)
-                        .help("Record a short clip and transcribe on demand.")
+                        .disabled(live.isRunning || pushToTalkDisabled || !sttReady)
+                        .help(
+                            sttReady
+                                ? "Record a short clip and transcribe on demand."
+                                : sttNotReadyHelp)
 
                         // Live / streaming.
                         Button {
@@ -157,9 +160,25 @@ struct ContentView: View {
                                     ? "stop.circle" : "dot.radiowaves.left.and.right")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(live.isRunning && live.phase == .stopping)
-                        .help("Continuous live captions via whisper (whisper-cli).")
+                        // Enabled only when a model is on disk; while live is
+                        // running the button becomes "Stop Live" and stays
+                        // enabled (except mid-stop).
+                        .disabled(
+                            (!live.isRunning && !sttReady)
+                                || (live.isRunning && live.phase == .stopping)
+                        )
+                        .help(
+                            sttReady
+                                ? "Continuous live captions via whisper (whisper-cli)."
+                                : sttNotReadyHelp)
 
+                    }
+
+                    // Why the buttons are greyed out: there is no model to run.
+                    if !sttReady {
+                        Label(sttNotReadyHelp, systemImage: "arrow.down.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     // Status: live mode or push-to-talk mode + input level.
@@ -338,6 +357,18 @@ struct ContentView: View {
     /// Disable the push-to-talk button when live or busy already.
     private var pushToTalkDisabled: Bool {
         live.isRunning || sttPhase == .requestingMic || sttPhase == .transcribing
+    }
+
+    /// True once a whisper model is actually on disk and selectable. Both STT
+    /// buttons are gated on this — pressing them with no model only ever
+    /// produced an error, so they are greyed out instead.
+    private var sttReady: Bool {
+        sttModel != nil
+    }
+
+    /// The hint shown on (and under) the greyed-out STT buttons.
+    private var sttNotReadyHelp: String {
+        "Download a speech-to-text model first: Settings (⌘,) › Speech-to-text › Download models."
     }
 
     private var pushToTalkTitle: String {

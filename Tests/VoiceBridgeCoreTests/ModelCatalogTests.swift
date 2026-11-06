@@ -54,6 +54,24 @@ final class ModelCatalogTests: XCTestCase {
         }
     }
 
+    /// The catalog ships a Chinese model for each engine, and the Chinese
+    /// whisper fine-tune is saved under the name the backend looks for.
+    func testChineseModelsArePresent() {
+        let belle = ModelCatalog.model(for: .belleTurboZh)
+        XCTAssertNotNil(belle, "the Belle Chinese whisper model must be in the catalog")
+        XCTAssertEqual(belle?.fileName, "ggml-belle-large-v3-turbo-zh.bin")
+        XCTAssertEqual(belle?.relativeDirectory, "whisper")
+        // The repo serves a generic file name; the download URL points at it
+        // while the on-disk name follows the whisper convention.
+        XCTAssertEqual(belle?.remoteURL.lastPathComponent, "ggml-model.bin")
+
+        let chineseVoice = ModelCatalog.tts.first { $0.id == "zh_CN-huayan-medium" }
+        XCTAssertNotNil(chineseVoice, "the Chinese Piper voice must be in the catalog")
+        XCTAssertFalse(
+            chineseVoice?.companions.isEmpty ?? true,
+            "a Piper voice needs its .onnx.json companion")
+    }
+
     /// A non-200 answer must fail the download, not become an installed model.
     ///
     /// `URLSession` reports 404 and 500 as *successful* transfers, so without

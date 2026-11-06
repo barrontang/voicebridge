@@ -53,6 +53,11 @@ export VOICEBRIDGE_WHISPER_SERVER=http://127.0.0.1:8080
 
 The app and the CLI pick it up automatically. It is still 100% local.
 
+**Chinese?** Settings → Speech-to-text offers **Chinese · Belle Large-v3-turbo (中文优化)** — BELLE-2's
+Mandarin fine-tune of large-v3-turbo (turbo speed, better Chinese CER). For speech *out*, download the
+**Chinese (Mandarin) · Huayan** Piper voice (it is the only `zh_CN` voice that runs on the Piper binary;
+the pinyin-phonemiser voices need the Python Piper). Or pin the language in Settings and use any model.
+
 **No terminal?** Open the app → Settings → **Download models** → *Download*.
 The file is streamed into a `.partial` sidecar, verified, and renamed into
 place, so an interrupted download can never look like an installed model.
@@ -189,7 +194,7 @@ clip length is known, otherwise `wallclock=…s` as a cost proxy.
 ## 4. Tests
 
 ```bash
-swift test                                        # 166 pure-logic tests, < 1 s
+swift test                                        # 167 pure-logic tests, < 1 s
 VOICEBRIDGE_NETWORK_TESTS=1 swift test            # + the live download test
 ```
 

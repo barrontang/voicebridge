@@ -17,6 +17,9 @@ public enum SttModel: String, CaseIterable, Codable, Sendable {
     case medium = "medium"
     case largeV3Turbo = "large-v3-turbo"
     case largeV3 = "large-v3"
+    /// BELLE-2's Chinese fine-tune of large-v3-turbo. Same speed as turbo,
+    /// markedly better Mandarin accuracy; still multilingual.
+    case belleTurboZh = "belle-large-v3-turbo-zh"
 
     /// Human readable label for UI pickers.
     public var label: String {
@@ -27,6 +30,7 @@ public enum SttModel: String, CaseIterable, Codable, Sendable {
         case .medium: return "Medium · balanced accuracy"
         case .largeV3Turbo: return "Large-v3-turbo · best speed/accuracy (RECOMMENDED)"
         case .largeV3: return "Large-v3 · maximum accuracy, slower"
+        case .belleTurboZh: return "Chinese · Belle Large-v3-turbo (中文优化)"
         }
     }
 
@@ -215,6 +219,14 @@ public enum SttModelCatalog {
                 "en", "fr", "de", "es", "it", "pt", "nl", "zh", "ja", "ko", "ru", "ar", "hi",
             ]),
         SttModelDescriptor(
+            id: "belle-large-v3-turbo-zh",
+            displayName: "Chinese · Belle Large-v3-turbo (中文优化)",
+            fileName: "ggml-belle-large-v3-turbo-zh.bin",
+            quantization: "f16",
+            sizeBytes: 1_624_555_275,
+            origin: .bundled,
+            languageHints: ["zh"]),
+        SttModelDescriptor(
             id: "large-v3",
             displayName: "Large-v3 · maximum accuracy, slower",
             fileName: "ggml-large-v3.bin",
@@ -260,6 +272,7 @@ public enum SttModelCatalog {
         case .medium: return bundled.first { $0.id == "medium" }
         case .largeV3Turbo: return bundled.first { $0.id == "large-v3-turbo" }
         case .largeV3: return bundled.first { $0.id == "large-v3" }
+        case .belleTurboZh: return bundled.first { $0.id == "belle-large-v3-turbo-zh" }
         }
     }
 }

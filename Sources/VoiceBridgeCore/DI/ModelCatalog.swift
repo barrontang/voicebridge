@@ -74,6 +74,9 @@ public enum ModelCatalog {
 
     private static let whisperBase = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
     private static let piperBase = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+    /// BELLE-2's Chinese fine-tune, published as a whisper.cpp ggml.
+    private static let belleZhBase =
+        "https://huggingface.co/BELLE-2/Belle-whisper-large-v3-turbo-zh-ggml/resolve/main"
 
     /// A URL built from a literal. A malformed literal is a programming
     /// error (not a runtime condition), so it traps instead of silently
@@ -102,6 +105,17 @@ public enum ModelCatalog {
             remoteURL: url("\(whisperBase)/ggml-large-v3-turbo.bin"),
             byteSize: 1_624_555_275,
             sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
+        DownloadableModel(
+            id: "belle-large-v3-turbo-zh",
+            displayName: "Chinese · Belle Large-v3-turbo (中文优化)",
+            kind: .stt,
+            // The repo serves the file as `ggml-model.bin`; it is saved under
+            // the whisper naming the backend expects (`ggml-<id>.bin`).
+            fileName: "ggml-belle-large-v3-turbo-zh.bin",
+            relativeDirectory: "whisper",
+            remoteURL: url("\(belleZhBase)/ggml-model.bin"),
+            byteSize: 1_624_555_275,
+            sha256: "2a3bba5bfdb4d4da3d9949a83b405711727ca1941d4d5810895e077eb3cb4d99"),
         DownloadableModel(
             id: "large-v3",
             displayName: "Large-v3 · maximum accuracy, slower",
@@ -155,6 +169,21 @@ public enum ModelCatalog {
     /// configuration (Piper reads the config from next to the model).
     public static let tts: [DownloadableModel] = [
         DownloadableModel(
+            id: "zh_CN-huayan-medium",
+            displayName: "Chinese (Mandarin) · Huayan · medium (中文)",
+            kind: .tts,
+            fileName: "zh_CN-huayan-medium.onnx",
+            relativeDirectory: "piper/voice",
+            remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx"),
+            byteSize: 63_201_294,
+            sha256: "9929917bf8cabb26fd528ea44d3a6699c11e87317a14765312420be230be0f3d",
+            companions: [
+                DownloadableModel.Companion(
+                    fileName: "zh_CN-huayan-medium.onnx.json",
+                    remoteURL: url(
+                        "\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json"))
+            ]),
+        DownloadableModel(
             id: "en_US-lessac-medium",
             displayName: "English (US) · Lessac · medium",
             kind: .tts,
@@ -182,21 +211,6 @@ public enum ModelCatalog {
                 DownloadableModel.Companion(
                     fileName: "en_US-amy-medium.onnx.json",
                     remoteURL: url("\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx.json"))
-            ]),
-        DownloadableModel(
-            id: "zh_CN-huayan-medium",
-            displayName: "Chinese (Mandarin) · Huayan · medium",
-            kind: .tts,
-            fileName: "zh_CN-huayan-medium.onnx",
-            relativeDirectory: "piper/voice",
-            remoteURL: url("\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx"),
-            byteSize: 63_201_294,
-            sha256: "9929917bf8cabb26fd528ea44d3a6699c11e87317a14765312420be230be0f3d",
-            companions: [
-                DownloadableModel.Companion(
-                    fileName: "zh_CN-huayan-medium.onnx.json",
-                    remoteURL: url(
-                        "\(piperBase)/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json"))
             ]),
     ]
 

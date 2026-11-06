@@ -25,7 +25,8 @@
 
 ## 🎯 Features
 
-- **🎤 Speech-to-Text** — `whisper.cpp` with Metal (GPU) acceleration, `large-v3-turbo` by default.
+- **🎤 Speech-to-Text** — `whisper.cpp` with Metal (GPU) acceleration, `large-v3-turbo` by default,
+  plus a **Chinese-tuned** option (BELLE-2's `Belle-whisper-large-v3-turbo-zh`): turbo speed, better Mandarin.
   - **Live captions**: word-by-word, VAD-segmented utterances, committed once and never re-worded.
     Live uses the same model you picked, a pinned language, and 0.8 s of left context per
     window — the three things that made it read worse than push-to-talk before.
@@ -51,7 +52,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  166 unit tests run in CI in under a second.
+  167 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 
@@ -156,7 +157,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 166 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 167 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
