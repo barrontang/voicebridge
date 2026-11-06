@@ -44,6 +44,23 @@ final class WhisperServerBackendTests: XCTestCase {
         XCTAssertTrue(body.range(of: audio) != nil)
     }
 
+    /// The server must be told to auto-detect (or honour a pinned language),
+    /// never left to a default that silently transcribes everything as English.
+    func testMultipartBodyCarriesTheLanguage() throws {
+        let auto = String(
+            decoding: try WhisperServerBackend.multipartBody(
+                boundary: "B", filename: "in.wav", audio: Data("x".utf8)),
+            as: UTF8.self)
+        XCTAssertTrue(auto.contains("name=\"language\""))
+        XCTAssertTrue(auto.contains("\r\n\r\nauto\r\n"), "default must be auto-detect")
+
+        let zh = String(
+            decoding: try WhisperServerBackend.multipartBody(
+                boundary: "B", filename: "in.wav", audio: Data("x".utf8), language: "zh"),
+            as: UTF8.self)
+        XCTAssertTrue(zh.contains("\r\n\r\nzh\r\n"), "a pinned language must be sent through")
+    }
+
     func testServerJSONIsParsedIntoTimedSegments() throws {
         // The shape whisper.cpp's server returns.
         let json = """

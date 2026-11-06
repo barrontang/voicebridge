@@ -126,6 +126,29 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
         return entries.first { $0.pathExtension == ext }?.path
     }
 
+    /// The common `whisper-cli` arguments (before the output-format flags).
+    ///
+    /// `-l auto` is deliberate and load-bearing: `whisper-cli` defaults the
+    /// language to **English**, not auto-detect, when `-l` is omitted. With the
+    /// default `en`, Chinese (or any non-English) speech is transcribed *as if
+    /// it were English* — a homophone soup that reads like a bad machine
+    /// translation ("Today's weather is good. Let's go to the 公園"). Passing
+    /// `auto` makes whisper detect the language and transcribe in it; a pinned
+    /// language is honoured as-is. We never pass `-tr` (translate), so the
+    /// output is always in the spoken language.
+    static func baseArguments(
+        modelPath: String,
+        audioPath: String,
+        language: String?,
+        useTimestamps: Bool
+    ) -> [String] {
+        var args = ["-m", modelPath, "-f", audioPath]
+        args += ["-l", language ?? "auto"]
+        if !useTimestamps { args.append("-nt") }  // clean text only
+        args += ["-pp"]  // print progress
+        return args
+    }
+
     /// `<workDir>/<base>.<ext>` — the filename whisper.cpp derives from the
     /// input basename (it keeps the original extension, e.g.
     /// `in.wav` → `in.wav.json`).
@@ -166,12 +189,12 @@ public final class WhisperCliBackend: WhisperBackend, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: workDir) }
         let baseName = audio.lastPathComponent  // e.g. "in.wav"
 
-        // Common args: model, file, language (nil = auto-detect),
-        // no-timestamps, progress.
-        var baseArgs = ["-m", modelPath.path, "-f", audio.path]
-        if let language { baseArgs += ["-l", language] }
-        if !useTimestamps { baseArgs.append("-nt") }  // clean text only
-        baseArgs += ["-pp"]  // print progress
+        // Common args: model, file, language, no-timestamps, progress.
+        let baseArgs = Self.baseArguments(
+            modelPath: modelPath.path,
+            audioPath: audio.path,
+            language: language,
+            useTimestamps: useTimestamps)
 
         let started = Date()
         var stdout = ""

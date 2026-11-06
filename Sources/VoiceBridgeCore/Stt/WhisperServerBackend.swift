@@ -66,7 +66,8 @@ public final class WhisperServerBackend: WhisperBackend, @unchecked Sendable {
         let body = try Self.multipartBody(
             boundary: boundary,
             filename: audio.lastPathComponent,
-            audio: data)
+            audio: data,
+            language: language ?? self.language ?? "auto")
 
         var request = URLRequest(url: baseURL.appendingPathComponent("inference"))
         request.httpMethod = "POST"
@@ -103,8 +104,22 @@ public final class WhisperServerBackend: WhisperBackend, @unchecked Sendable {
     }
 
     /// Build the multipart body the server expects.
-    static func multipartBody(boundary: String, filename: String, audio: Data) throws -> Data {
+    ///
+    /// The `language` field matters: `whisper-server` transcribes in the spoken
+    /// language when it is `auto`, but a client that omits the field leaves the
+    /// behaviour to however the server was launched. Sending it explicitly keeps
+    /// the server path consistent with the CLI (which defaults to English
+    /// otherwise). We never ask the server to translate.
+    static func multipartBody(
+        boundary: String,
+        filename: String,
+        audio: Data,
+        language: String = "auto"
+    ) throws -> Data {
         var body = Data()
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"language\"\r\n\r\n".utf8))
+        body.append(Data("\(language)\r\n".utf8))
         body.append(Data("--\(boundary)\r\n".utf8))
         body.append(
             Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8)
