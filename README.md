@@ -164,7 +164,7 @@ folder, and the model downloads.
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
-| `scripts/` | `build.sh` · `dev-check.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `make-icon.sh` · `verify-catalog.sh` |
+| `scripts/` | `build.sh` · `dev-check.sh` · `install-cli.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `make-icon.sh` · `verify-catalog.sh` |
 | `skills/voicebridge-tts/` | An agent skill: pipe any text into `voicebridge-cli tts`. |
 
 ---
@@ -238,13 +238,20 @@ your environment — don't launch VoiceBridge from a wrapper you don't trust.
 
 ## 🤖 Talk to DeepSeek Harness
 
+Put the CLI on your PATH first (symlinks into `~/.local/bin`, copies the DSH patches to
+`~/.voicebridge/dsh/`):
+
+```bash
+scripts/install-cli.sh
+```
+
 Work with DSH by voice: a **conversation**, not one-off questions. Every turn continues the
 same DSH session, so it remembers what you said, the files it touched and its tool results —
 "add a test for that", then "now run it", then "commit it".
 
 ```bash
 voicebridge-cli chat                              # Enter = speak · or type · /new /session /mute /quit
-voicebridge-cli chat --patch examples/dsh-ollama.yml  # fully local: whisper + Ollama + say
+voicebridge-cli chat --patch ~/.voicebridge/dsh/dsh-ollama.yml  # fully local: whisper + Ollama + say
 voicebridge-cli ask --listen 15 --loop            # hands-free: listen → answer → listen …
 voicebridge-cli ask --text "总结一下这个仓库"       # one question, no mic
 voicebridge-cli ask --session <id> --audio q.m4a  # continue an earlier conversation
