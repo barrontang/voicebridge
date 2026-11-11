@@ -114,4 +114,128 @@ final class DSHClientTests: XCTestCase {
             DSHClient.resolvePatch(
                 "missing.yml", cwd: "/x", installed: installed, exists: { _ in false }))
     }
+
+    /// A failure must read as a sentence with a next step, not a path and a
+    /// stack trace.
+    func testDSHFailuresAreWordedForABubble() {
+        let missingKey = """
+            dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_API_KEY …
+            """
+        XCTAssertTrue(DSHClient.friendlyError(stderr: missingKey).contains("Local model"))
+
+        let crash = """
+            file:///Applications/…/index.js:4713
+            \t\tthrow new Error(…)
+            Error: dsh: failed to read overlay /x/dsh-ollama.yml: Error: ENOENT
+                at loadOverlayPatches (file:///…)
+            Node.js v24.21.0
+            """
+        let message = DSHClient.friendlyError(stderr: crash)
+        XCTAssertTrue(message.contains("/x/dsh-ollama.yml"))
+        XCTAssertFalse(message.contains("at loadOverlayPatches"))
+
+        XCTAssertEqual(
+            DSHClient.friendlyError(stderr: "dsh: INVALID_REQUEST: 400 bad thinking mode"),
+            "DeepSeek Harness: INVALID_REQUEST: 400 bad thinking mode".replacingOccurrences(
+                of: "INVALID_REQUEST: ", with: ""))
+    }
+
+    // MARK: - Discovery and the child environment (P0-1)
+
+    /// A Finder-launched app has `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so PATH
+    /// alone misses Homebrew, `~/.local/bin` and a per-user app install.
+    func testDiscoveryLooksBeyondTheGuiPath() throws {
+        XCTAssertEqual(
+            DSHClient.locate(environment: ["PATH": "/usr/bin"]) {
+                $0 == "/opt/homebrew/bin/dsh"
+            }, "/opt/homebrew/bin/dsh", "Homebrew is not on a GUI's PATH")
+
+        let perUser =
+            ("~/Applications/" as NSString).expandingTildeInPath + "/DeepSeek Harness.app/"
+            + DSHClient.launcherPathInBundle
+        XCTAssertEqual(
+            DSHClient.locate(environment: ["PATH": "/usr/bin"]) { $0 == perUser }, perUser,
+            "an app dragged to ~/Applications is still found")
+
+        let expanded = ("~/bin/dsh" as NSString).expandingTildeInPath
+        XCTAssertEqual(
+            DSHClient.locate(environment: ["VOICEBRIDGE_DSH": "~/bin/dsh"]) { $0 == expanded },
+            expanded, "the override gets tilde expansion")
+
+        XCTAssertEqual(
+            DSHClient.locate(environment: ["PATH": "/usr/bin"], override: "/chosen/dsh") { _ in true
+            },
+            "/chosen/dsh", "an explicit choice wins")
+    }
+
+    /// The app must hand DSH a usable environment: a Finder launch has no
+    /// shell exports, and the local patch needs `OLLAMA_API_KEY` to exist.
+    func testTheChildEnvironmentCarriesPathAndTheOllamaKey() throws {
+        let env = DSHClient.childEnvironment(base: ["PATH": "/usr/bin"])
+        let path = try XCTUnwrap(env["PATH"])
+        XCTAssertTrue(path.contains("/opt/homebrew/bin"))
+        XCTAssertEqual(env["OLLAMA_API_KEY"], "ollama")
+
+        let kept = DSHClient.childEnvironment(base: ["OLLAMA_API_KEY": "kept"])
+        XCTAssertEqual(kept["OLLAMA_API_KEY"], "kept", "a real value is never overwritten")
+    }
+
+    /// A read-only turn is what keeps DSH out of the user's files.
+    func testAReadOnlyTurnPassesThePermissionMode() {
+        XCTAssertEqual(
+            DSHClient.arguments(
+                prompt: "hi", profile: "headless", patches: [], permissionMode: "read-only"),
+            ["--profile", "headless", "--permission-mode", "read-only", "--json", "hi"])
+    }
+
+    // MARK: - Progress (P1-3)
+
+    func testProgressReadsTheEventStream() {
+        XCTAssertEqual(DSHClient.progress(forLine: #"{"type":"thinking","text":"hmm"}"#), .thinking)
+        XCTAssertEqual(DSHClient.progress(forLine: #"{"type":"text","text":"ok"}"#), .text("ok"))
+        XCTAssertEqual(
+            DSHClient.progress(
+                forLine:
+                    #"{"type":"tool_call","tool":"write","input":{"file_path":"/tmp/probe.txt"}}"#
+            ),
+            .tool(phrase: "Writing probe.txt…", name: "write"))
+        XCTAssertNil(DSHClient.progress(forLine: "plain text, not JSON"))
+    }
+
+    func testToolPhrasesAreShortAndHuman() {
+        XCTAssertEqual(
+            DSHClient.phrase(forTool: "bash", input: ["command": "swift test"]),
+            "Running swift test…")
+        XCTAssertEqual(
+            DSHClient.phrase(forTool: "read", input: ["path": "/a/b.txt"]), "Reading b.txt…")
+        XCTAssertEqual(DSHClient.phrase(forTool: "mystery", input: [:]), "Using mystery…")
+    }
+
+    // MARK: - Failures carry a next step
+
+    /// Electron writes a warning to stderr on every third-party launch; it must
+    /// never be mistaken for the error.
+    func testTheElectronNoiseIsNotTheErrorMessage() {
+        let stderr = """
+            [1111/231530.769256:ERROR:electron/shell/app/node_main.cc:154] Node.js environment variables are disabled because this process is invoked by other apps.
+            dsh: AUTH: Authentication Fails, Your api key: ****test is invalid (request_id: 1)
+            """
+        let message = DSHClient.friendlyError(stderr: stderr)
+        XCTAssertTrue(message.contains("rejected the API key"))
+        XCTAssertFalse(message.contains("request_id"), "no internal ids in a chat bubble")
+        XCTAssertFalse(message.contains("electron"))
+    }
+
+    /// A dead session id is recoverable, so it must be recognisable.
+    func testAMissingSessionIsRecognisable() {
+        XCTAssertEqual(
+            DSHClient.kind(
+                forStderr:
+                    #"dsh: session "session-x" does not exist; omit --session-id to start a new Session"#
+            ),
+            .missingSession)
+        XCTAssertEqual(
+            DSHClient.kind(forStderr: "dsh: MISSING_CREDENTIAL: no API key"), .missingCredential)
+        XCTAssertEqual(DSHClient.kind(forStderr: "boom"), .other)
+    }
 }

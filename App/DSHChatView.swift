@@ -29,11 +29,47 @@ enum DSHBackend: String, CaseIterable, Identifiable {
     }
 }
 
+/// The defaults shared by this window and the Settings page.
+enum DSHSettings {
+    static let backendKey = "dshChat.backend"
+    static let folderKey = "dshChat.folder"
+    static let readOnlyKey = "dshChat.readOnly"
+    static let timeoutKey = "dshChat.timeout"
+    static let pathKey = "dsh.path"
+    static let consentKey = "dshChat.remoteConsent"
+    static let sessionPrefix = "dshChat.session."
+
+    static let defaultTimeout: Double = 300
+
+    /// Each folder keeps its own conversation.
+    static func sessionKey(for folder: URL) -> String {
+        sessionPrefix + folder.standardizedFileURL.path
+    }
+
+    /// Where DSH works when the user has not chosen a folder.
+    ///
+    /// Deliberately **not** the home directory: DSH runs with `workspace-write`,
+    /// so the folder chosen here is the tree an agent may edit. A dedicated
+    /// folder keeps the blast radius small, and it is created on demand.
+    static func defaultFolder() -> URL {
+        let base =
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let folder = base.appendingPathComponent("VoiceBridge", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+}
+
 struct DSHChatView: View {
     @StateObject private var chat: DSHChatModel
     @StateObject private var recorder: PushToTalkSession
-    @AppStorage("dshChat.backend") private var backendRaw = DSHBackend.local.rawValue
+    @AppStorage(DSHSettings.backendKey) private var backendRaw = DSHBackend.local.rawValue
+    @AppStorage(DSHSettings.consentKey) private var remoteConsent = false
     @FocusState private var inputFocused: Bool
+    /// While the remote-model warning is up: did the user tap the mic or Send?
+    @State private var pendingVoice = false
+    @State private var showRemoteWarning = false
 
     init() {
         let recorder = PushToTalkSession()
@@ -52,10 +88,31 @@ struct DSHChatView: View {
             Divider()
             inputBar
         }
-        .frame(minWidth: 480, minHeight: 520)
+        .frame(minWidth: 500, minHeight: 520)
         .onAppear { inputFocused = true }
         .onChange(of: chat.workingDirectory) {
-            UserDefaults.standard.set(chat.workingDirectory.path, forKey: "dshChat.folder")
+            UserDefaults.standard.set(chat.workingDirectory.path, forKey: DSHSettings.folderKey)
+        }
+        .alert("Send this to DeepSeek's servers?", isPresented: $showRemoteWarning) {
+            Button("Send it") {
+                remoteConsent = true
+                if pendingVoice {
+                    pendingVoice = false
+                    Task { await chat.toggleMicrophone() }
+                } else {
+                    Task { await chat.sendDraft() }
+                }
+            }
+            Button("Use the local model", role: .cancel) {
+                pendingVoice = false
+                backendRaw = DSHBackend.local.rawValue
+            }
+        } message: {
+            Text(
+                "“DSH default model” answers from DeepSeek's servers: your words — and "
+                    + "anything DSH reads in this folder — are sent there. “Local model "
+                    + "(Ollama)” keeps everything on this Mac."
+            )
         }
     }
 
@@ -113,14 +170,21 @@ struct DSHChatView: View {
                 LazyVStack(spacing: 10) {
                     if chat.messages.isEmpty { emptyState }
                     ForEach(chat.messages) { MessageBubble(message: $0) }
-                    if chat.phase == .thinking || chat.phase == .transcribing {
-                        WorkingBubble(phase: chat.phase).id("working")
+                    if chat.isBusy {
+                        // The answer so far, while the model is still writing it.
+                        if let partial = chat.streamingText, !partial.isEmpty {
+                            MessageBubble(
+                                message: ChatMessage(role: .assistant, text: partial)
+                            )
+                            .opacity(0.65)
+                        }
+                        WorkingBubble(phase: chat.phase, activity: chat.activity).id("working")
                     }
                 }
                 .padding(14)
             }
             .onChange(of: chat.messages.count) { scrollToEnd(proxy) }
-            .onChange(of: chat.phase) { scrollToEnd(proxy) }
+            .onChange(of: chat.activity) { scrollToEnd(proxy) }
         }
     }
 
@@ -132,13 +196,13 @@ struct DSHChatView: View {
             Text("Talk to DeepSeek Harness")
                 .font(.title3.weight(.medium))
             Text(
-                "Tap the mic and speak, or type. DSH works in the folder above and "
-                    + "remembers the whole conversation."
+                "Tap the mic and speak, or type. DSH works in the folder above — it can "
+                    + "read and edit files there — and remembers the conversation."
             )
             .font(.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
-            .frame(maxWidth: 340)
+            .frame(maxWidth: 360)
         }
         .padding(.top, 60)
     }
@@ -172,19 +236,30 @@ struct DSHChatView: View {
             )
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(.quaternary))
             .focused($inputFocused)
-            .disabled(chat.isBusy || chat.phase == .recording)
-            .onSubmit { Task { await chat.sendDraft() } }
+            .disabled(chat.isInputBlocked || chat.phase == .recording)
+            .onSubmit { submit() }
 
-            Button {
-                Task { await chat.sendDraft() }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
+            if chat.isBusy {
+                Button {
+                    chat.cancelTurn()
+                } label: {
+                    Image(systemName: "stop.circle.fill").font(.system(size: 28))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.red)
+                .help("Stop — the DSH task is killed, not just hidden")
+            } else {
+                Button {
+                    submit()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                .disabled(!canSend)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Send (⌘↩)")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
-            .disabled(!canSend)
-            .keyboardShortcut(.return, modifiers: .command)
-            .help("Send (⌘↩)")
         }
         .padding(12)
     }
@@ -193,10 +268,35 @@ struct DSHChatView: View {
         chat.phase == .idle && !chat.draft.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// Whether the selected backend sends the conversation off this Mac.
+    private var isRemoteBackend: Bool {
+        (DSHBackend(rawValue: backendRaw) ?? .local) == .dshDefault
+    }
+
+    /// Typed and spoken turns are equally remote, so both ask once.
+    private func submit() {
+        guard chat.phase == .idle else { return }
+        if isRemoteBackend && !remoteConsent {
+            pendingVoice = false
+            showRemoteWarning = true
+            return
+        }
+        Task { await chat.sendDraft() }
+    }
+
+    private func tapMic() {
+        if chat.phase == .idle && isRemoteBackend && !remoteConsent {
+            pendingVoice = true
+            showRemoteWarning = true
+            return
+        }
+        Task { await chat.toggleMicrophone() }
+    }
+
     private var micButton: some View {
         let recording = chat.phase == .recording
         return Button {
-            Task { await chat.toggleMicrophone() }
+            tapMic()
         } label: {
             ZStack {
                 Circle()
@@ -219,7 +319,7 @@ struct DSHChatView: View {
             .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
-        .disabled(chat.isBusy)
+        .disabled(chat.isInputBlocked)
         .keyboardShortcut("m", modifiers: .command)
         .help(recording ? "Stop and send (⌘M)" : "Tap to talk (⌘M)")
     }
@@ -233,18 +333,19 @@ struct DSHChatView: View {
         panel.allowsMultipleSelection = false
         panel.directoryURL = chat.workingDirectory
         panel.prompt = "Work Here"
+        panel.message = "DSH can read and edit files in the folder you pick."
         if panel.runModal() == .OK, let url = panel.url {
             chat.changeWorkingDirectory(url)
         }
     }
 
     private static func initialFolder() -> URL {
-        if let saved = UserDefaults.standard.string(forKey: "dshChat.folder"),
+        if let saved = UserDefaults.standard.string(forKey: DSHSettings.folderKey),
             FileManager.default.fileExists(atPath: saved)
         {
             return URL(fileURLWithPath: saved, isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser
+        return DSHSettings.defaultFolder()
     }
 
     // MARK: - Wiring the real engines
@@ -253,20 +354,32 @@ struct DSHChatView: View {
     private static func dependencies(recorder: PushToTalkSession) -> DSHChatModel.Dependencies {
         DSHChatModel.Dependencies(
             makeAsker: { folder in
-                guard let dsh = DSHClient.locate() else {
+                guard
+                    let dsh = DSHClient.locate(
+                        override: UserDefaults.standard.string(forKey: DSHSettings.pathKey))
+                else {
                     throw VoiceError.binaryNotFound(
                         component: "DeepSeek Harness (dsh)",
-                        hint: "Install DeepSeek Harness, or set VOICEBRIDGE_DSH.")
+                        hint: "Install DeepSeek Harness, or choose its dsh launcher in "
+                            + "Settings › DeepSeek Harness.")
                 }
                 let backend =
                     DSHBackend(
-                        rawValue: UserDefaults.standard.string(forKey: "dshChat.backend") ?? "")
+                        rawValue: UserDefaults.standard.string(forKey: DSHSettings.backendKey) ?? ""
+                    )
                     ?? .local
                 let patches =
                     backend == .local ? [try DSHClient.ensureLocalOllamaPatch()] : []
+                let storedTimeout = UserDefaults.standard.double(forKey: DSHSettings.timeoutKey)
+                let timeout = storedTimeout > 0 ? storedTimeout : DSHSettings.defaultTimeout
+                let readOnly = UserDefaults.standard.bool(forKey: DSHSettings.readOnlyKey)
                 return DSHClient(
                     configuration: .init(
-                        executable: dsh, patches: patches, workingDirectory: folder.path))
+                        executable: dsh,
+                        patches: patches,
+                        workingDirectory: folder.path,
+                        timeout: timeout,
+                        permissionMode: readOnly ? "read-only" : nil))
             },
             startRecording: {
                 let url = FileManager.default.temporaryDirectory
@@ -275,6 +388,8 @@ struct DSHChatView: View {
             },
             stopRecording: { await recorder.stop() },
             transcribe: { clip in
+                // The clip is only needed until whisper has read it.
+                defer { try? FileManager.default.removeItem(at: clip) }
                 // The same model + language the rest of the app uses.
                 let config = TTSConfigManager(persistChanges: false)
                 config.scan()
@@ -291,7 +406,18 @@ struct DSHChatView: View {
                         useTimestamps: false
                     ).text
             },
-            speak: { text in try? await SystemSpeech.speak(text) })
+            speak: { text in try? await SystemSpeech.speak(text) },
+            loadSession: { folder in
+                UserDefaults.standard.string(forKey: DSHSettings.sessionKey(for: folder))
+            },
+            saveSession: { folder, session in
+                let key = DSHSettings.sessionKey(for: folder)
+                if let session {
+                    UserDefaults.standard.set(session, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            })
     }
 }
 
@@ -348,20 +474,31 @@ private struct MessageBubble: View {
 
 private struct WorkingBubble: View {
     let phase: DSHChatModel.Phase
+    /// What DSH is doing ("Writing probe.txt…"), when it has said.
+    let activity: String?
 
     var body: some View {
         HStack {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(phase == .transcribing ? "Transcribing…" : "DeepSeek Harness is working…")
+                Text(caption)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
             Spacer()
+        }
+    }
+
+    private var caption: String {
+        switch phase {
+        case .transcribing: return "Transcribing…"
+        case .speaking: return "Speaking…"
+        default: return activity ?? "DeepSeek Harness is working…"
         }
     }
 }

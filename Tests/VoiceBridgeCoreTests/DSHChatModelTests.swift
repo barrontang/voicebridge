@@ -13,23 +13,56 @@ final class DSHChatModelTests: XCTestCase {
         private var _calls: [(prompt: String, session: String?)] = []
         var answer = "ok"
         var fail = false
+        /// Throw this on the next call, then behave normally.
+        var failOnce: Error?
+        /// Report a tool call before answering, like a real agent run.
+        var toolPhrase: String?
         var calls: [(prompt: String, session: String?)] {
             lock.lock()
             defer { lock.unlock() }
             return _calls
         }
 
-        func ask(_ prompt: String, session: String?) async throws -> DSHClient.Reply {
+        func ask(
+            _ prompt: String,
+            session: String?,
+            onProgress: (@Sendable (DSHClient.Progress) -> Void)?
+        ) async throws -> DSHClient.Reply {
             lock.lock()
             _calls.append((prompt, session))
+            let once = failOnce
+            failOnce = nil
+            let phrase = toolPhrase
             lock.unlock()
+            if let once { throw once }
             if fail { throw VoiceError.processFailed(component: "dsh", status: 1, stderr: "boom") }
+            if let phrase { onProgress?(.tool(phrase: phrase, name: "write")) }
+            onProgress?(.text(answer))
             return DSHClient.Reply(text: answer, sessionID: session ?? "session-1")
+        }
+    }
+
+    /// A backend that never answers until it is cancelled.
+    private final class HangingDSH: DSHAsking, @unchecked Sendable {
+        func ask(
+            _ prompt: String,
+            session: String?,
+            onProgress: (@Sendable (DSHClient.Progress) -> Void)?
+        ) async throws -> DSHClient.Reply {
+            try await Task.sleep(for: .seconds(60))
+            return DSHClient.Reply(text: "too late", sessionID: session)
         }
     }
 
     private final class Spoken: @unchecked Sendable {
         var texts: [String] = []
+        /// The model's phase at the moment each answer was read aloud.
+        var phases: [DSHChatModel.Phase?] = []
+    }
+
+    /// Records what the model asked to persist.
+    private final class Saver: @unchecked Sendable {
+        var pairs: [(folder: String, session: String?)] = []
     }
 
     private func makeModel(
@@ -186,5 +219,138 @@ final class DSHChatModelTests: XCTestCase {
         try "edited".write(toFile: path, atomically: true, encoding: .utf8)
         _ = try DSHClient.ensureLocalOllamaPatch(in: dir)
         XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8), "edited")
+    }
+
+    // MARK: - Lifecycle (review findings P1-4/5/6)
+
+    /// An answer being read aloud must block input: recording then would
+    /// transcribe the app's own voice.
+    func testTheAnswerIsSpokenInItsOwnPhase() async {
+        let dsh = FakeDSH()
+        dsh.answer = "Done."
+        let box = ModelBox()
+        let seen = Spoken()
+        let model = DSHChatModel(
+            workingDirectory: URL(fileURLWithPath: "/repo"),
+            dependencies: .init(
+                makeAsker: { _ in dsh },
+                startRecording: {},
+                stopRecording: { nil },
+                transcribe: { _ in "" },
+                speak: { _ in seen.phases.append(box.model?.phase) }))
+        box.model = model
+
+        model.draft = "hi"
+        await model.sendDraft()
+
+        XCTAssertEqual(
+            seen.phases.compactMap { $0 }, [.speaking], "speak() runs while the phase is .speaking")
+        XCTAssertEqual(model.phase, .idle)
+        XCTAssertTrue(model.messages.last?.text == "Done.")
+    }
+
+    /// A stored session that DSH no longer has must not wedge the chat.
+    func testADeadSessionIsForgottenAndRetriedOnce() async {
+        let dsh = FakeDSH()
+        dsh.failOnce = DSHClient.DSHError(message: "gone", kind: .missingSession)
+        let model = DSHChatModel(
+            workingDirectory: URL(fileURLWithPath: "/repo"),
+            dependencies: .init(
+                makeAsker: { _ in dsh },
+                startRecording: {},
+                stopRecording: { nil },
+                transcribe: { _ in "" },
+                speak: { _ in },
+                loadSession: { _ in "session-old" },
+                saveSession: { _, _ in }))
+
+        XCTAssertEqual(model.sessionID, "session-old")
+        model.draft = "still there?"
+        await model.sendDraft()
+
+        XCTAssertEqual(dsh.calls.map(\.session), ["session-old", nil], "retried in a new session")
+        XCTAssertEqual(model.sessionID, "session-1")
+        XCTAssertEqual(model.messages.last?.role, .assistant, "the retry succeeded")
+    }
+
+    /// The conversation survives a relaunch, per folder.
+    func testTheSessionIsRestoredAndSavedPerFolder() async {
+        let dsh = FakeDSH()
+        let saved = Saver()
+        let folder = URL(fileURLWithPath: "/repo")
+        let model = DSHChatModel(
+            workingDirectory: folder,
+            dependencies: .init(
+                makeAsker: { _ in dsh },
+                startRecording: {},
+                stopRecording: { nil },
+                transcribe: { _ in "" },
+                speak: { _ in },
+                loadSession: { _ in "session-kept" },
+                saveSession: { url, id in saved.pairs.append((url.path, id)) }))
+
+        model.draft = "hello again"
+        await model.sendDraft()
+
+        XCTAssertEqual(dsh.calls.first?.session, "session-kept", "the turn resumes what was stored")
+        XCTAssertEqual(saved.pairs.last?.folder, folder.path)
+        XCTAssertEqual(saved.pairs.last?.session ?? nil, "session-1", "the new id is persisted")
+
+        model.newConversation()
+        XCTAssertFalse(saved.pairs.isEmpty)
+        XCTAssertNil(saved.pairs.last?.session ?? nil, "a new conversation clears the stored id")
+    }
+
+    /// Stop must cancel the turn (killing the child) and say so, not error.
+    func testStoppingATurnCancelsIt() async {
+        let model = DSHChatModel(
+            workingDirectory: URL(fileURLWithPath: "/repo"),
+            dependencies: .init(
+                makeAsker: { _ in HangingDSH() },
+                startRecording: {},
+                stopRecording: { nil },
+                transcribe: { _ in "" },
+                speak: { _ in }))
+
+        model.draft = "do something slow"
+        let turn = Task { await model.sendDraft() }
+        // Let the turn start and park inside ask().
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(model.phase, .thinking)
+
+        model.cancelTurn()
+        await turn.value
+
+        XCTAssertEqual(model.phase, .idle)
+        XCTAssertEqual(model.messages.last?.role, .notice)
+        XCTAssertEqual(model.messages.last?.text, "Stopped.")
+    }
+
+    /// The "working…" line is cleared when the turn ends, so a later turn
+    /// starts from a clean state.
+    func testToolActivityIsClearedWhenTheTurnEnds() async {
+        let dsh = FakeDSH()
+        dsh.toolPhrase = "Writing probe.txt…"
+        let model = DSHChatModel(
+            workingDirectory: URL(fileURLWithPath: "/repo"),
+            dependencies: .init(
+                makeAsker: { _ in dsh },
+                startRecording: {},
+                stopRecording: { nil },
+                transcribe: { _ in "" },
+                speak: { _ in }))
+
+        model.draft = "write it"
+        await model.sendDraft()
+
+        XCTAssertNil(model.activity, "the line is cleared when the turn ends")
+        XCTAssertNil(model.streamingText, "the streamed text is replaced by the final bubble")
+        XCTAssertEqual(
+            model.messages.filter { $0.role == .assistant }.count, 1,
+            "the streamed text is not left behind as a second bubble")
+    }
+
+    final class ModelBox: @unchecked Sendable {
+        var model: DSHChatModel?
     }
 }

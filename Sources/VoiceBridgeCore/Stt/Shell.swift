@@ -24,11 +24,17 @@ public enum Shell {
 
     /// Runs a binary, draining both pipes concurrently so large output never
     /// deadlocks the process, and throws on non-zero exit or timeout.
+    ///
+    /// `onLine` reports output while the child is still running (progress);
+    /// `environment` overrides the child's environment, which a GUI app needs
+    /// because it does not inherit what a shell exports.
     public static func run(
         at binary: String,
         arguments: [String],
         workingDirectory: String? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        environment: [String: String]? = nil,
+        onLine: (@Sendable (ProcessLine) -> Void)? = nil
     ) async throws -> Result {
         guard !isBlank(binary) else {
             throw VoiceError.binaryNotFound(component: "(empty)", hint: "No binary was provided.")
@@ -39,7 +45,9 @@ public enum Shell {
                 executable: binary,
                 arguments: arguments,
                 workingDirectory: workingDirectory,
-                timeout: timeout))
+                timeout: timeout,
+                environment: environment),
+            onLine: onLine)
 
         if outcome.timedOut {
             throw VoiceError.processTimeout(

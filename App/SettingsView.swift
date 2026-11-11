@@ -26,6 +26,12 @@ struct SettingsView: View {
     /// Drives the "download a model" rows.
     @StateObject private var downloads = ModelDownloadController()
 
+    // DeepSeek Harness. Shared with the chat window through `DSHSettings`.
+    @AppStorage(DSHSettings.pathKey) private var dshPath = ""
+    @AppStorage(DSHSettings.readOnlyKey) private var dshReadOnly = false
+    @AppStorage(DSHSettings.timeoutKey) private var dshTimeout = DSHSettings.defaultTimeout
+    @State private var detectedDSH: String?
+
     /// A short human description of the currently-selected TTS engine.
     private var ttsEngineBlurb: String {
         switch ttsConfig.selectedMode {
@@ -71,6 +77,7 @@ struct SettingsView: View {
                 sttGroup
                 downloadGroup
                 folderGroup
+                dshGroup
                 explainerGroup
             }
             .padding(16)
@@ -80,6 +87,7 @@ struct SettingsView: View {
         .onAppear {
             ttsConfig.scan()
             ttsConfig.scanSttModels()
+            detectDSH()
             // After a download, the model lists (and the main page) must be
             // refreshed - otherwise a freshly installed model stays invisible.
             downloads.onInstalled = {
@@ -316,7 +324,94 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Group 5: explainer
+    // MARK: - Group 5: DeepSeek Harness
+
+    private var dshGroup: some View {
+        GroupBox("DeepSeek Harness") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(
+                    "The chat window (⇧⌘D) and `voicebridge-cli chat` drive DeepSeek "
+                        + "Harness through its headless CLI. An app launched from the "
+                        + "Finder cannot see your shell's PATH, so if `dsh` lives "
+                        + "somewhere unusual, point at it here."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                LabeledContent("dsh") {
+                    HStack(spacing: 6) {
+                        if detectedDSH == nil {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        Text(dshDescription)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                HStack {
+                    Button("Choose dsh...") { chooseDSHLauncher() }
+                    Button("Find automatically") {
+                        dshPath = ""
+                        detectDSH()
+                    }
+                    Spacer()
+                }
+
+                Toggle("Read-only: DSH may read files but not edit them", isOn: $dshReadOnly)
+                    .help(
+                        "Runs DSH with --permission-mode read-only. Answers still work; "
+                            + "every write or command that changes files is refused.")
+
+                Stepper(value: $dshTimeout, in: 60...3600, step: 60) {
+                    Text("Timeout: \(Int(dshTimeout)) s").font(.callout)
+                }
+                .help("How long one task may run before it is killed.")
+
+                Text(
+                    "The folder DSH works in is chosen in the chat window. It is created "
+                        + "as ~/Documents/VoiceBridge by default, because DSH can edit "
+                        + "whatever is selected there."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// What to show next to the "dsh" label.
+    private var dshDescription: String {
+        if let detectedDSH { return detectedDSH }
+        if !dshPath.isEmpty { return "\(dshPath) (not executable)" }
+        return "Not found - install DeepSeek Harness, or choose its launcher."
+    }
+
+    /// Re-run discovery with the current override.
+    private func detectDSH() {
+        detectedDSH = DSHClient.locate(override: dshPath.isEmpty ? nil : dshPath)
+    }
+
+    private func chooseDSHLauncher() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.prompt = "Use dsh"
+        panel.message = "Pick the `dsh` launcher inside DeepSeek Harness."
+        panel.directoryURL = URL(
+            fileURLWithPath: "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin"
+        )
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        dshPath = url.path
+        detectDSH()
+    }
+
+    // MARK: - Group 6: explainer
 
     private var explainerGroup: some View {
         GroupBox("What the save buttons do") {

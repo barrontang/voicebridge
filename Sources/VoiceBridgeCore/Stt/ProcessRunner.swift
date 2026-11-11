@@ -11,19 +11,44 @@ public struct ProcessInvocation: Sendable {
     public var standardInput: Data?
     /// Seconds before the child is terminated (nil = wait forever).
     public var timeout: TimeInterval?
+    /// The environment to hand the child. `nil` inherits ours.
+    ///
+    /// This is not cosmetic: a GUI app launched from Finder does **not** inherit
+    /// the variables a shell exports (`PATH`, `OLLAMA_API_KEY`, …), so a child
+    /// that needs one has to be given it explicitly.
+    public var environment: [String: String]?
 
     public init(
         executable: String,
         arguments: [String] = [],
         workingDirectory: String? = nil,
         standardInput: Data? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        environment: [String: String]? = nil
     ) {
         self.executable = executable
         self.arguments = arguments
         self.workingDirectory = workingDirectory
         self.standardInput = standardInput
         self.timeout = timeout
+        self.environment = environment
+    }
+}
+
+/// One line of a child's output, delivered while the child is still running.
+public struct ProcessLine: Sendable, Equatable {
+    public enum Channel: String, Sendable, Equatable {
+        case stdout
+        case stderr
+    }
+
+    public let channel: Channel
+    /// The line, without its trailing newline.
+    public let text: String
+
+    public init(channel: Channel, text: String) {
+        self.channel = channel
+        self.text = text
     }
 }
 
@@ -64,7 +89,14 @@ public struct ProcessOutcome: Sendable {
 public enum ProcessRunner {
 
     /// Run a child process to completion.
-    public static func run(_ invocation: ProcessInvocation) async throws -> ProcessOutcome {
+    ///
+    /// `onLine` is called for every line the child writes, as it writes it, so a
+    /// caller can show progress long before the process exits. It is invoked
+    /// from the pipe-reading threads: keep it cheap and thread-safe.
+    public static func run(
+        _ invocation: ProcessInvocation,
+        onLine: (@Sendable (ProcessLine) -> Void)? = nil
+    ) async throws -> ProcessOutcome {
         let process = Process()
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -72,6 +104,9 @@ public enum ProcessRunner {
 
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
+        if let environment = invocation.environment {
+            process.environment = environment
+        }
         if let dir = invocation.workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: dir)
         }
@@ -85,8 +120,12 @@ public enum ProcessRunner {
         process.terminationHandler = { p in exit.signal(p.terminationStatus) }
 
         // Drain both pipes concurrently, *before* we wait for the exit.
-        let outTask = Task.detached(priority: .userInitiated) { readAll(outPipe) }
-        let errTask = Task.detached(priority: .userInitiated) { readAll(errPipe) }
+        let outTask = Task.detached(priority: .userInitiated) {
+            readPipe(outPipe, channel: .stdout, emit: onLine)
+        }
+        let errTask = Task.detached(priority: .userInitiated) {
+            readPipe(errPipe, channel: .stderr, emit: onLine)
+        }
 
         do {
             try process.run()
@@ -179,6 +218,43 @@ public enum ProcessRunner {
             throw VoiceError.processTimeout(component: component, seconds: timeout)
         }
         return status
+    }
+
+    /// Read a pipe to EOF, optionally reporting each line as it arrives.
+    ///
+    /// The whole output is returned either way, so a caller can use the
+    /// streaming callback purely as a progress channel and still parse the
+    /// complete text afterwards.
+    private static func readPipe(
+        _ pipe: Pipe,
+        channel: ProcessLine.Channel,
+        emit: (@Sendable (ProcessLine) -> Void)?
+    ) -> String {
+        guard let emit else { return readAll(pipe) }
+        let handle = pipe.fileHandleForReading
+        var pending = Data()
+        var full = Data()
+        while true {
+            // `availableData` blocks until there is something to read, and
+            // returns empty data at EOF.
+            let chunk = handle.availableData
+            if chunk.isEmpty { break }
+            full.append(chunk)
+            pending.append(chunk)
+            while let newline = pending.firstIndex(of: 0x0A) {
+                let line = pending[pending.startIndex..<newline]
+                pending.removeSubrange(pending.startIndex...newline)
+                emit(
+                    ProcessLine(
+                        channel: channel, text: String(decoding: line, as: UTF8.self)))
+            }
+        }
+        if !pending.isEmpty {
+            emit(
+                ProcessLine(
+                    channel: channel, text: String(decoding: pending, as: UTF8.self)))
+        }
+        return String(decoding: full, as: UTF8.self)
     }
 
     /// Read a pipe to EOF.

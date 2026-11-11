@@ -27,6 +27,9 @@ VoiceBridgeCore     (SPM library, no SwiftUI/UIKit, @testable)
     │               Playback, CacheGuardian, Pipeline
     ├── DI/         VoiceBridgeEnvironment, ModelPaths, BinaryLocator, AppPaths,
     │               ModelDownloader, ModelCatalog, ModelDownloadController, VBLog
+    ├── DSH/        DSHClient (headless CLI: locate, stream events, word failures),
+    │               DSHChatModel (phases, session persistence, cancellation),
+    │               SystemSpeech (macOS `say`)
     └── Models.swift
 voicebridge-cli     (SPM executable)
 App/                (SwiftUI shell — imports VoiceBridgeCore)

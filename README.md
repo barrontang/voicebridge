@@ -52,7 +52,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  190 unit tests run in CI in under a second.
+  203 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 - **🤖 Voice chat with DeepSeek Harness** — a chat window in the app (⇧⌘D) and `voicebridge-cli chat`: talk to
@@ -160,7 +160,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 190 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 203 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
@@ -240,10 +240,27 @@ your environment — don't launch VoiceBridge from a wrapper you don't trust.
 
 **In the app:** click **Chat with DeepSeek Harness** (or press **⇧⌘D**). It's a messaging-style
 window: tap the mic (⌘M) to talk, or type and press Return. Answers come back as bubbles and are
-read aloud (🔊 toggles it). The folder button picks where DSH works, and the picker chooses
-**Local model (Ollama)**, where nothing leaves the Mac, or **DSH default model**. Every message
-continues one DSH session; ✎ starts a new one. `open VoiceBridge.app --args --open-chat` opens
-straight into the chat.
+read aloud (🔊 toggles it). While DSH works, the line under the spinner says what it is doing
+("Writing probe.txt…"), and **■ stops it** — the DSH process is killed, not just hidden.
+
+The folder button picks where DSH works. **DSH can read and edit files in that folder** (it runs
+with DSH's `workspace-write` permission), so the default is a dedicated `~/Documents/VoiceBridge`
+rather than your home directory. Each folder keeps its own conversation: the session id is saved,
+so relaunching continues where you left off; ✎ starts a new one.
+`open VoiceBridge.app --args --open-chat` opens straight into the chat.
+
+The picker chooses **Local model (Ollama)**, where nothing leaves the Mac, or **DSH default model**,
+which asks DeepSeek's servers — the first time you send to the remote one, the app says so before
+anything leaves. **Settings › DeepSeek Harness** holds the rest: the `dsh` location, a
+**read-only** switch that refuses every write, and the per-task timeout (default 300 s).
+
+### Finding `dsh`
+
+VoiceBridge looks in `VOICEBRIDGE_DSH`, then `$PATH`, then the usual package-manager bins
+(`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …), then the desktop app in
+`/Applications` **and** `~/Applications`. The order matters because an app launched from Finder
+gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so a Homebrew `dsh` is invisible to it. Anywhere else,
+point at it once in **Settings › DeepSeek Harness**.
 
 **From a terminal**, put the CLI on your PATH first (symlinks into `~/.local/bin`, copies the DSH patches to
 `~/.voicebridge/dsh/`):
@@ -265,7 +282,7 @@ voicebridge-cli ask --session <id> --audio q.m4a  # continue an earlier conversa
 ```
 
 `chat` runs DSH in the current directory (`dsh --profile headless --json --session-id …`),
-found via `VOICEBRIDGE_DSH`, `$PATH`, or the app bundle. `--patch` picks the model; `--lang`
+found the same way the app finds it (override, `$PATH`, package bins, app bundle). `--patch` picks the model; `--lang`
 pins the speech language; answers are spoken with macOS `say` (a Chinese voice for Chinese
 answers) or `--engine piper|edge|…`. DSH's reasoning is never read aloud — only its answer.
 A failed turn (no mic, a DSH error) is reported and the chat keeps going.
