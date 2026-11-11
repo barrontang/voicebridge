@@ -52,9 +52,12 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  172 unit tests run in CI in under a second.
+  176 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
+- **🤖 Voice interface for DeepSeek Harness** — `voicebridge-cli ask`: speak a question,
+  whisper transcribes it, [DSH](https://github.com/deepseek-ai/deepseek-harness) answers
+  (any DSH model — DeepSeek, Copilot, or a local Ollama model), and the answer is spoken back.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -157,7 +160,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 172 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 176 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
@@ -230,6 +233,23 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
 `VOICEBRIDGE_FISH_TTS` and `AFPLAY` all accept an absolute path to a binary or server. That is
 a deliberate seam for development, and it is also a path-hijack vector if someone else can set
 your environment — don't launch VoiceBridge from a wrapper you don't trust.
+
+---
+
+## 🤖 Talk to DeepSeek Harness
+
+```bash
+voicebridge-cli ask                               # listen 8 s → DSH → spoken answer
+voicebridge-cli ask --listen 15 --loop            # hands-free conversation (Ctrl-C to stop)
+voicebridge-cli ask --audio question.m4a          # a recorded question
+voicebridge-cli ask --text "总结一下这个仓库"       # skip the mic
+voicebridge-cli ask --patch examples/dsh-ollama.yml   # fully local: whisper + Ollama + say
+```
+
+It runs `dsh --profile headless` (found via `VOICEBRIDGE_DSH`, `$PATH`, or the app bundle),
+in the current directory, so DSH can work on the repo you're standing in. `--patch` picks
+the model; `--lang` pins the speech language; `--engine piper|edge|…` changes the voice
+(default: macOS `say`, which switches to a Chinese voice for Chinese answers).
 
 ---
 

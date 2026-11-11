@@ -39,6 +39,7 @@ struct Main {
             case "stt": try await runSTT(Array(args.dropFirst()))
             case "transcribe": try await runBatch(Array(args.dropFirst()))
             case "tts": try await runTTS(Array(args.dropFirst()))
+            case "ask": try await runAsk(Array(args.dropFirst()))
             case "ping": runPing()
             case "--version", "-v", "version": printVersion()
             case "help", "-h", "--help": printMenu()
@@ -288,6 +289,147 @@ struct Main {
         }
     }
 
+    // MARK: - Voice interface for DeepSeek Harness
+
+    /// Talk to DSH: speech in → whisper → `dsh --profile headless` → speech out.
+    ///
+    ///   voicebridge-cli ask                       listen 8 s, ask, speak the answer
+    ///   voicebridge-cli ask --listen 15 --loop    hands-free conversation
+    ///   voicebridge-cli ask --audio q.m4a         a recorded question
+    ///   voicebridge-cli ask --text "你好"          skip STT (no mic needed)
+    ///
+    /// Options: --lang zh|en|… (default auto), --model M, --engine say|piper|edge|…
+    /// (default `say`), --voice V,
+    /// --profile P (default headless), --patch FILE (repeatable; e.g. selects
+    /// the DSH model), --no-speak (print only).
+    static func runAsk(_ args: [String]) async throws {
+        var audio: URL?
+        var text: String?
+        var listenSeconds: Double = 8
+        var loop = false
+        var language: String?
+        var model = SttModel.largeV3Turbo
+        // `say` by default: offline, and reliable from a headless process (the
+        // in-place AVSpeech engine needs an app run loop to report completion).
+        var engine = "say"
+        var voice: String?
+        var profile = "headless"
+        var patches: [String] = []
+        var speak = true
+
+        var it = args.makeIterator()
+        while let tok = it.next() {
+            switch tok {
+            case "--audio": audio = it.next().map { URL(fileURLWithPath: $0) }
+            case "--text": text = it.next()
+            case "--listen": listenSeconds = Double(it.next() ?? "") ?? listenSeconds
+            case "--loop": loop = true
+            case "--lang": language = it.next()
+            case "--model": model = SttModel(rawValue: it.next() ?? "") ?? model
+            case "--engine": engine = it.next() ?? engine
+            case "--voice": voice = it.next()
+            case "--profile": profile = it.next() ?? profile
+            case "--patch": if let p = it.next() { patches.append(p) }
+            case "--no-speak": speak = false
+            default: print("ignoring: \(tok)")
+            }
+        }
+
+        guard let dsh = DSHClient.locate() else {
+            throw VoiceError.binaryNotFound(
+                component: "dsh",
+                hint: "Install DeepSeek Harness, or set VOICEBRIDGE_DSH to the dsh launcher.")
+        }
+        let client = DSHClient(
+            configuration: .init(
+                executable: dsh, profile: profile, patches: patches,
+                workingDirectory: FileManager.default.currentDirectoryPath))
+
+        repeat {
+            // 1. The question, as text.
+            let question: String
+            if let text {
+                question = text
+            } else {
+                let clip: URL
+                if let audio {
+                    clip = try prepareAudio(audio)
+                } else {
+                    clip = try await recordClip(seconds: listenSeconds)
+                }
+                print("→ transcribing…")
+                question = try await sttBackend().transcribe(
+                    audio: clip, language: language, model: model, useTimestamps: false
+                ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !question.isEmpty else {
+                print("[heard nothing]")
+                if loop { continue } else { return }
+            }
+            print("🗣  \(question)")
+
+            // 2. Ask DSH.
+            print("→ asking DeepSeek Harness (\(profile))…")
+            let answer = try await client.ask(question)
+            print("🤖 \(answer.isEmpty ? "[no answer]" : answer)")
+
+            // 3. Speak the answer.
+            if speak, !answer.isEmpty {
+                if engine == "say" {
+                    try await sayAloud(answer, voice: voice)
+                } else {
+                    var ttsArgs = ["--text", answer, "--engine", engine]
+                    if let voice { ttsArgs += ["--voice", voice] }
+                    try await runTTS(ttsArgs)
+                }
+            }
+            // A fixed question or file is a single turn.
+        } while loop && text == nil && audio == nil
+    }
+
+    /// Speak with macOS `say`, choosing a Chinese voice for Chinese text.
+    static func sayAloud(_ text: String, voice: String?) async throws {
+        let say = "/usr/bin/say"
+        var args: [String] = []
+        if let voice {
+            args = ["-v", voice]
+        } else if WordDiff.isMostlyCJK(text),
+            let zh = await firstWorkingSayVoice(
+                ["Tingting", "Lanlan", "Meijia", "Han", "Sinji"])
+        {
+            args = ["-v", zh]
+        }
+        _ = try await Shell.run(at: say, arguments: args + [text], timeout: 600)
+    }
+
+    /// The first `say` voice that is installed (a missing one exits non-zero).
+    static func firstWorkingSayVoice(_ candidates: [String]) async -> String? {
+        let probe = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vb-say-probe.aiff").path
+        for name in candidates {
+            if (try? await Shell.run(at: "/usr/bin/say", arguments: ["-v", name, "-o", probe, "好"]))
+                != nil
+            {
+                return name
+            }
+        }
+        return nil
+    }
+
+    /// Record `seconds` of microphone audio to a temp 16 kHz WAV.
+    static func recordClip(seconds: Double) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vb-ask-\(UUID().uuidString).wav")
+        let session = PushToTalkSession()
+        try await session.start(url: url)
+        print("🎙  listening for \(Int(seconds)) s — speak now…")
+        try? await Task.sleep(for: .seconds(seconds))
+        guard let recorded = await session.stop() else {
+            throw VoiceError.audioDeviceUnavailable(reason: "nothing was recorded")
+        }
+        return recorded
+    }
+
     /// Play a generated audio file from a headless CLI.
     ///
     /// `afplay` is the reliable path (it blocks until the audio finishes and
@@ -443,6 +585,8 @@ struct Main {
              transcribe --in <dir> --out <dir>   transcribe a whole folder
              tts   --text "..." [--voice V] [--engine piper|system|edge-tts|kokoro|fish-audio]
                    `... | voicebridge-cli tts` [--engine ...]  speak piped text
+             ask   [--listen S] [--loop] [--audio F] [--text T] [--lang L] [--patch P]
+                   voice interface for DeepSeek Harness: speak → dsh → hear the answer
              ping                            show engine, model, & mic availability
              --version                       print the version
              help                            this menu

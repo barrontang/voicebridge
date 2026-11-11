@@ -40,7 +40,7 @@ public enum WordDiff {
         return trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
-    static func isMostlyCJK(_ text: String) -> Bool {
+    public static func isMostlyCJK(_ text: String) -> Bool {
         var cjk = 0
         var latin = 0
         for scalar in text.unicodeScalars {
