@@ -24,6 +24,7 @@ enum SttPhase {
 struct ContentView: View {
     @EnvironmentObject var ttsConfig: TTSConfigManager
     @Environment(\.openSettings) private var openSettingsAction
+    @Environment(\.openWindow) private var openWindow
 
     // - TTS -
     @State private var text = "Hello. This is VoiceBridge, running fully on device."
@@ -49,9 +50,21 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Text("VoiceBridge")
                     .font(.largeTitle.bold())
-                Text("Local speech-to-text & text-to-speech")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Local speech-to-text & text-to-speech")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        openWindow(id: "dsh-chat")
+                    } label: {
+                        Label(
+                            "Chat with DeepSeek Harness",
+                            systemImage: "bubble.left.and.text.bubble.right")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Talk to DSH by voice or text (⇧⌘D)")
+                }
 
                 // - - - TTS card - - -
                 VStack(alignment: .leading, spacing: 10) {
@@ -258,6 +271,10 @@ struct ContentView: View {
         .padding()
         .frame(minWidth: 560, minHeight: 700)
         .onAppear {
+            // `open VoiceBridge.app --args --open-chat` goes straight to the DSH chat.
+            if CommandLine.arguments.contains("--open-chat") {
+                openWindow(id: "dsh-chat")
+            }
             ttsConfig.scan()
             Playback.assumesRunningLoop = true
             applySttModel(ttsConfig.selectedSttModel)

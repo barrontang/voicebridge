@@ -2,6 +2,7 @@
 //
 // Two scenes:
 //      * WindowGroup    : the minimal main page (TTS + Voice-to-Text) — ContentView.
+//      * Window         : "Chat with DeepSeek Harness" — DSHChatView (⇧⌘D).
 //      * Settings       : the config page — SettingsView — to pick the TTS model.
 //
 // The observable config manager is owned exactly once here as `@StateObject`
@@ -29,6 +30,13 @@ struct VoiceBridgeApp: App {
             ContentView()
                 .environmentObject(ttsConfig)
         }
+
+        // ── Chat with DeepSeek Harness: voice or text, one DSH session.
+        Window("Chat with DeepSeek Harness", id: "dsh-chat") {
+            DSHChatView()
+        }
+        .keyboardShortcut("d", modifiers: [.command, .shift])
+        .defaultSize(width: 560, height: 680)
 
         // ── Config page: pick the TTS engine + voice + model root.
         // Opens automatically as the "Settings…" (⌘,) menu item and from

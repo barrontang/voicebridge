@@ -498,31 +498,7 @@ struct Main {
 
     /// Speak with macOS `say`, choosing a Chinese voice for Chinese text.
     static func sayAloud(_ text: String, voice: String?) async throws {
-        let say = "/usr/bin/say"
-        var args: [String] = []
-        if let voice {
-            args = ["-v", voice]
-        } else if WordDiff.isMostlyCJK(text),
-            let zh = await firstWorkingSayVoice(
-                ["Tingting", "Lanlan", "Meijia", "Han", "Sinji"])
-        {
-            args = ["-v", zh]
-        }
-        _ = try await Shell.run(at: say, arguments: args + [text], timeout: 600)
-    }
-
-    /// The first `say` voice that is installed (a missing one exits non-zero).
-    static func firstWorkingSayVoice(_ candidates: [String]) async -> String? {
-        let probe = FileManager.default.temporaryDirectory
-            .appendingPathComponent("vb-say-probe.aiff").path
-        for name in candidates {
-            if (try? await Shell.run(at: "/usr/bin/say", arguments: ["-v", name, "-o", probe, "好"]))
-                != nil
-            {
-                return name
-            }
-        }
-        return nil
+        try await SystemSpeech.speak(text, voice: voice)
     }
 
     /// Record `seconds` of microphone audio to a temp 16 kHz WAV.

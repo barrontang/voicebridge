@@ -56,6 +56,55 @@ public struct DSHClient: Sendable {
             .appendingPathComponent(".voicebridge/dsh", isDirectory: true)
     }
 
+    /// The DSH patch that answers with a local Ollama model (`qwen3.5:4b`).
+    /// Mirrors `examples/dsh-ollama.yml` (a test keeps the two identical).
+    public static let localOllamaPatch = #"""
+        # DSH patch for `voicebridge-cli ask`: answer with a local Ollama model, so the
+        # whole voice loop (whisper → DSH → TTS) stays on this Mac.
+        #
+        #   voicebridge-cli ask --patch examples/dsh-ollama.yml
+        #
+        # Needs `ollama pull qwen3.5:4b` and an OLLAMA_API_KEY credential (any value —
+        # Ollama ignores it, DSH requires one): export OLLAMA_API_KEY=ollama
+        - id: credentials
+          name: "@deepseek-ai/dsh-credentials-local"
+          disabled: false
+        - id: llm-pi-ai
+          name: "@deepseek-ai/dsh-llm-pi-ai"
+          config:
+            providers:
+              ollama:
+                displayName: Ollama (local)
+                api: openai-completions
+                baseURL: http://127.0.0.1:11434/v1
+                apiKeyEnv: OLLAMA_API_KEY
+                models:
+                  - id: qwen3.5:4b
+                    name: Qwen3.5 4B
+                    contextWindow: 32768
+                    maxTokens: 4096
+        - id: agent-default-model
+          name: "@deepseek-ai/dsh-agent-default-model"
+          config:
+            provider: ollama
+            model: qwen3.5:4b
+        """#
+
+    /// Write the local-model patch to `~/.voicebridge/dsh/` if it is not there
+    /// yet, and return its path. The app uses this so the local mode works
+    /// without the repo checkout or `scripts/install-cli.sh`.
+    public static func ensureLocalOllamaPatch(
+        in directory: URL = DSHClient.installedPatchDirectory
+    ) throws -> String {
+        let file = directory.appendingPathComponent("dsh-ollama.yml")
+        if !FileManager.default.fileExists(atPath: file.path) {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            try localOllamaPatch.write(to: file, atomically: true, encoding: .utf8)
+        }
+        return file.path
+    }
+
     /// Resolve a `--patch` argument to an existing file, or nil.
     ///
     /// Tried in order: as given (absolute, `~`, or relative to `cwd`), then by

@@ -52,10 +52,10 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  181 unit tests run in CI in under a second.
+  190 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
-- **🤖 Voice chat with DeepSeek Harness** — `voicebridge-cli chat`: talk to
+- **🤖 Voice chat with DeepSeek Harness** — a chat window in the app (⇧⌘D) and `voicebridge-cli chat`: talk to
   [DSH](https://github.com/deepseek-ai/deepseek-harness) and hear it answer, in one ongoing
   session, so it can do multi-step work in your repo (any DSH model, including a local Ollama one).
 
@@ -160,7 +160,7 @@ folder, and the model downloads.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 181 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 190 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
@@ -238,7 +238,14 @@ your environment — don't launch VoiceBridge from a wrapper you don't trust.
 
 ## 🤖 Talk to DeepSeek Harness
 
-Put the CLI on your PATH first (symlinks into `~/.local/bin`, copies the DSH patches to
+**In the app:** click **Chat with DeepSeek Harness** (or press **⇧⌘D**). It's a messaging-style
+window: tap the mic (⌘M) to talk, or type and press Return. Answers come back as bubbles and are
+read aloud (🔊 toggles it). The folder button picks where DSH works, and the picker chooses
+**Local model (Ollama)**, where nothing leaves the Mac, or **DSH default model**. Every message
+continues one DSH session; ✎ starts a new one. `open VoiceBridge.app --args --open-chat` opens
+straight into the chat.
+
+**From a terminal**, put the CLI on your PATH first (symlinks into `~/.local/bin`, copies the DSH patches to
 `~/.voicebridge/dsh/`):
 
 ```bash
