@@ -205,8 +205,8 @@ public enum ModelCatalog {
             fileName: "en_US-amy-medium.onnx",
             relativeDirectory: "piper/voice",
             remoteURL: url("\(piperBase)/en/en_US/amy/medium/en_US-amy-medium.onnx"),
-            byteSize: 63_201_294,
-            sha256: "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18",
+            byteSize: 63_221_984,
+            sha256: "cf9ccdec59f05adee47173f6fb4d89e8b0c5f30c178748d2572fe4efd1d2724c",
             companions: [
                 DownloadableModel.Companion(
                     fileName: "en_US-amy-medium.onnx.json",
