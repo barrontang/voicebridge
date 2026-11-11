@@ -338,9 +338,20 @@ struct Main {
                 component: "dsh",
                 hint: "Install DeepSeek Harness, or set VOICEBRIDGE_DSH to the dsh launcher.")
         }
+        var patches: [String] = []
+        for patch in options.patches {
+            guard let resolved = DSHClient.resolvePatch(patch) else {
+                throw VoiceError.fileNotFound(
+                    what: "DSH patch '\(patch)'",
+                    hint: "Looked in \(FileManager.default.currentDirectoryPath) and "
+                        + "\(DSHClient.installedPatchDirectory.path) — run scripts/install-cli.sh, "
+                        + "or pass an absolute path.")
+            }
+            patches.append(resolved)
+        }
         return DSHClient(
             configuration: .init(
-                executable: dsh, profile: options.profile, patches: options.patches,
+                executable: dsh, profile: options.profile, patches: patches,
                 workingDirectory: FileManager.default.currentDirectoryPath))
     }
 

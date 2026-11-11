@@ -50,6 +50,35 @@ public struct DSHClient: Sendable {
         self.configuration = configuration
     }
 
+    /// Where `scripts/install-cli.sh` puts the example patches.
+    public static var installedPatchDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".voicebridge/dsh", isDirectory: true)
+    }
+
+    /// Resolve a `--patch` argument to an existing file, or nil.
+    ///
+    /// Tried in order: as given (absolute, `~`, or relative to `cwd`), then by
+    /// file name in `~/.voicebridge/dsh/`. The fallback is what makes
+    /// `--patch examples/dsh-ollama.yml` work outside the repo; checking up
+    /// front means a bad path fails *before* the user speaks, with one line
+    /// instead of DSH's Node stack trace.
+    public static func resolvePatch(
+        _ path: String,
+        cwd: String = FileManager.default.currentDirectoryPath,
+        installed: URL = DSHClient.installedPatchDirectory,
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> String? {
+        let expanded = (path as NSString).expandingTildeInPath
+        let direct =
+            expanded.hasPrefix("/")
+            ? expanded : URL(fileURLWithPath: cwd).appendingPathComponent(expanded).path
+        if exists(direct) { return direct }
+        let fallback = installed.appendingPathComponent((expanded as NSString).lastPathComponent)
+            .path
+        return exists(fallback) ? fallback : nil
+    }
+
     /// Find `dsh`: `VOICEBRIDGE_DSH` → `$PATH` → the desktop app bundle.
     public static func locate(
         environment: [String: String] = ProcessInfo.processInfo.environment,

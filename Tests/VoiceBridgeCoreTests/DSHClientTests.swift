@@ -93,4 +93,25 @@ final class DSHClientTests: XCTestCase {
             "Done. Run make.\ncode")
         XCTAssertEqual(DSHClient.cleanAnswer("  plain answer  \n"), "plain answer")
     }
+
+    /// `--patch examples/dsh-ollama.yml` must work outside the repo.
+    func testPatchResolvesRelativeThenFromTheInstalledCopy() {
+        let installed = URL(fileURLWithPath: "/home/u/.voicebridge/dsh")
+        // Relative to the working directory, when it is there.
+        XCTAssertEqual(
+            DSHClient.resolvePatch(
+                "examples/dsh-ollama.yml", cwd: "/repo", installed: installed,
+                exists: { $0 == "/repo/examples/dsh-ollama.yml" }),
+            "/repo/examples/dsh-ollama.yml")
+        // Otherwise by file name in ~/.voicebridge/dsh/.
+        XCTAssertEqual(
+            DSHClient.resolvePatch(
+                "examples/dsh-ollama.yml", cwd: "/elsewhere", installed: installed,
+                exists: { $0 == "/home/u/.voicebridge/dsh/dsh-ollama.yml" }),
+            "/home/u/.voicebridge/dsh/dsh-ollama.yml")
+        // Neither: nil, so the CLI fails before listening.
+        XCTAssertNil(
+            DSHClient.resolvePatch(
+                "missing.yml", cwd: "/x", installed: installed, exists: { _ in false }))
+    }
 }

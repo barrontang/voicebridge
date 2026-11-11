@@ -86,6 +86,8 @@ public enum VoiceError: LocalizedError, Sendable {
     /// No usable microphone input (none connected, or the default device has
     /// no hardware input format). Distinct from a permission denial.
     case audioDeviceUnavailable(reason: String)
+    /// A file the user named on the command line does not exist.
+    case fileNotFound(what: String, hint: String)
     // Missing 3: a precise, user-actionable disk-space message.
     case insufficientDiskSpace(needed: Int64, available: Int64, at: String)
     // Finding 8: discard a download whose checksum doesn't match.
@@ -118,6 +120,8 @@ public enum VoiceError: LocalizedError, Sendable {
             return "TTS engine '\(e)' is unavailable: \(reason)"
         case .audioDeviceUnavailable(let reason):
             return "Microphone unavailable: \(reason)"
+        case .fileNotFound(let what, let hint):
+            return "\(what) not found. \(hint)"
         case .insufficientDiskSpace(let needed, let available, let at):
             let need = vbFormatBytes(needed)
             let have = vbFormatBytes(available)
