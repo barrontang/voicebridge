@@ -65,28 +65,79 @@ public struct DSHClient: Sendable {
         return isExecutable(appBundleLauncher) ? appBundleLauncher : nil
     }
 
+    /// One answer, and the DSH session it belongs to.
+    public struct Reply: Sendable, Equatable {
+        public let text: String
+        /// Pass this back as `session` to continue the same conversation.
+        public let sessionID: String?
+    }
+
     /// The exact argument vector for one prompt. Pure, so it is unit-tested.
     ///
-    /// The prompt is passed as one positional argument (no shell is involved),
-    /// so quotes, newlines and CJK reach DSH intact.
-    public static func arguments(prompt: String, profile: String, patches: [String]) -> [String] {
+    /// `--json` makes DSH emit newline-delimited events: the session id, the
+    /// model's thinking (separately — nothing to strip), and a `final` answer.
+    /// `--session-id` resumes a persisted session, which is what turns a
+    /// sequence of one-shot calls into a conversation: DSH keeps the history,
+    /// the tool results and the working state between turns.
+    ///
+    /// The prompt is one positional argument (no shell involved), so quotes,
+    /// newlines and CJK reach DSH intact.
+    public static func arguments(
+        prompt: String, profile: String, patches: [String], session: String? = nil
+    ) -> [String] {
         var args = ["--profile", profile]
         for patch in patches { args += ["--patch", patch] }
+        args.append("--json")
+        if let session { args += ["--session-id", session] }
         args.append(prompt)
         return args
     }
 
-    /// Ask DSH and return its answer text.
-    public func ask(_ prompt: String) async throws -> String {
+    /// Ask DSH. Pass the previous reply's `sessionID` to continue that
+    /// conversation; `nil` starts a new one.
+    public func ask(_ prompt: String, session: String? = nil) async throws -> Reply {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
+        guard !trimmed.isEmpty else { return Reply(text: "", sessionID: session) }
         let result = try await Shell.run(
             at: configuration.executable,
             arguments: Self.arguments(
-                prompt: trimmed, profile: configuration.profile, patches: configuration.patches),
+                prompt: trimmed, profile: configuration.profile,
+                patches: configuration.patches, session: session),
             workingDirectory: configuration.workingDirectory,
             timeout: configuration.timeout)
-        return Self.cleanAnswer(result.stdout)
+        let parsed = Self.parseEvents(result.stdout)
+        return Reply(text: Self.cleanAnswer(parsed.text), sessionID: parsed.sessionID ?? session)
+    }
+
+    /// Read DSH's `--json` event stream.
+    ///
+    /// The `final` event carries the answer; if a run ends without one (an
+    /// interrupted turn), the streamed `text` events are joined instead.
+    /// `thinking` events are ignored — reasoning is never read aloud. Lines that
+    /// are not JSON (a plain-text build) are kept as the answer.
+    public static func parseEvents(_ stdout: String) -> (text: String, sessionID: String?) {
+        var sessionID: String?
+        var finalText: String?
+        var streamed: [String] = []
+        var plain: [String] = []
+        for line in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let data = line.data(using: .utf8),
+                let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let type = event["type"] as? String
+            else {
+                plain.append(String(line))
+                continue
+            }
+            if let id = event["sessionId"] as? String { sessionID = id }
+            switch type {
+            case "final": finalText = event["text"] as? String
+            case "text": if let t = event["text"] as? String { streamed.append(t) }
+            default: break
+            }
+        }
+        let text =
+            finalText ?? (streamed.isEmpty ? plain.joined(separator: "\n") : streamed.joined())
+        return (text, sessionID)
     }
 
     /// Strip what should not be read aloud.

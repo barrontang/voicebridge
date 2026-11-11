@@ -14,9 +14,48 @@ final class DSHClientTests: XCTestCase {
         XCTAssertEqual(
             args,
             [
-                "--profile", "headless", "--patch", "/a.yml", "--patch", "/b.yml",
+                "--profile", "headless", "--patch", "/a.yml", "--patch", "/b.yml", "--json",
                 "今天天气怎么样？ \"quoted\"",
             ])
+    }
+
+    /// A follow-up turn resumes the session, which is what makes it a chat.
+    func testAFollowUpTurnResumesTheSession() {
+        let args = DSHClient.arguments(
+            prompt: "now run the tests", profile: "headless", patches: [], session: "session-abc")
+        XCTAssertEqual(
+            args,
+            ["--profile", "headless", "--json", "--session-id", "session-abc", "now run the tests"])
+    }
+
+    /// The real event shape DSH's headless `--json` mode emits.
+    func testTheEventStreamYieldsTheAnswerAndTheSession() {
+        let stdout = """
+            {"type":"session","sessionId":"session-37128f81","cwd":"/tmp"}
+            {"type":"status","phase":"turn_start","turn":1}
+            {"type":"thinking","text":"The user wants me to remember 42."}
+            {"type":"text","text":"ok"}
+            {"type":"final","sessionId":"session-37128f81","reason":{"kind":"completed"},"text":"ok"}
+            """
+        let parsed = DSHClient.parseEvents(stdout)
+        XCTAssertEqual(parsed.text, "ok", "thinking must never be part of the answer")
+        XCTAssertEqual(parsed.sessionID, "session-37128f81")
+    }
+
+    /// An interrupted turn has no `final`; the streamed text is the answer.
+    func testStreamedTextIsUsedWithoutAFinalEvent() {
+        let stdout = """
+            {"type":"session","sessionId":"s1"}
+            {"type":"text","text":"Hello, "}
+            {"type":"text","text":"world."}
+            """
+        XCTAssertEqual(DSHClient.parseEvents(stdout).text, "Hello, world.")
+    }
+
+    func testPlainTextOutputStillWorks() {
+        let parsed = DSHClient.parseEvents("just an answer\n")
+        XCTAssertEqual(parsed.text, "just an answer")
+        XCTAssertNil(parsed.sessionID)
     }
 
     func testLocatePrefersTheOverrideThenPathThenTheAppBundle() {

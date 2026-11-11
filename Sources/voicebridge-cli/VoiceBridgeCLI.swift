@@ -40,6 +40,7 @@ struct Main {
             case "transcribe": try await runBatch(Array(args.dropFirst()))
             case "tts": try await runTTS(Array(args.dropFirst()))
             case "ask": try await runAsk(Array(args.dropFirst()))
+            case "chat": try await runChat(Array(args.dropFirst()))
             case "ping": runPing()
             case "--version", "-v", "version": printVersion()
             case "help", "-h", "--help": printMenu()
@@ -291,18 +292,8 @@ struct Main {
 
     // MARK: - Voice interface for DeepSeek Harness
 
-    /// Talk to DSH: speech in → whisper → `dsh --profile headless` → speech out.
-    ///
-    ///   voicebridge-cli ask                       listen 8 s, ask, speak the answer
-    ///   voicebridge-cli ask --listen 15 --loop    hands-free conversation
-    ///   voicebridge-cli ask --audio q.m4a         a recorded question
-    ///   voicebridge-cli ask --text "你好"          skip STT (no mic needed)
-    ///
-    /// Options: --lang zh|en|… (default auto), --model M, --engine say|piper|edge|…
-    /// (default `say`), --voice V,
-    /// --profile P (default headless), --patch FILE (repeatable; e.g. selects
-    /// the DSH model), --no-speak (print only).
-    static func runAsk(_ args: [String]) async throws {
+    /// Options shared by `ask` and `chat`.
+    struct VoiceOptions {
         var audio: URL?
         var text: String?
         var listenSeconds: Double = 8
@@ -316,75 +307,182 @@ struct Main {
         var profile = "headless"
         var patches: [String] = []
         var speak = true
+        /// Resume an existing DSH session instead of starting a new one.
+        var session: String?
 
-        var it = args.makeIterator()
-        while let tok = it.next() {
-            switch tok {
-            case "--audio": audio = it.next().map { URL(fileURLWithPath: $0) }
-            case "--text": text = it.next()
-            case "--listen": listenSeconds = Double(it.next() ?? "") ?? listenSeconds
-            case "--loop": loop = true
-            case "--lang": language = it.next()
-            case "--model": model = SttModel(rawValue: it.next() ?? "") ?? model
-            case "--engine": engine = it.next() ?? engine
-            case "--voice": voice = it.next()
-            case "--profile": profile = it.next() ?? profile
-            case "--patch": if let p = it.next() { patches.append(p) }
-            case "--no-speak": speak = false
-            default: print("ignoring: \(tok)")
+        init(_ args: [String]) {
+            var it = args.makeIterator()
+            while let tok = it.next() {
+                switch tok {
+                case "--audio": audio = it.next().map { URL(fileURLWithPath: $0) }
+                case "--text": text = it.next()
+                case "--listen": listenSeconds = Double(it.next() ?? "") ?? listenSeconds
+                case "--loop": loop = true
+                case "--lang": language = it.next()
+                case "--model": model = SttModel(rawValue: it.next() ?? "") ?? model
+                case "--engine": engine = it.next() ?? engine
+                case "--voice": voice = it.next()
+                case "--profile": profile = it.next() ?? profile
+                case "--patch": if let p = it.next() { patches.append(p) }
+                case "--session", "--session-id": session = it.next()
+                case "--no-speak": speak = false
+                default: print("ignoring: \(tok)")
+                }
             }
         }
+    }
 
+    static func makeDSHClient(_ options: VoiceOptions) throws -> DSHClient {
         guard let dsh = DSHClient.locate() else {
             throw VoiceError.binaryNotFound(
                 component: "dsh",
                 hint: "Install DeepSeek Harness, or set VOICEBRIDGE_DSH to the dsh launcher.")
         }
-        let client = DSHClient(
+        return DSHClient(
             configuration: .init(
-                executable: dsh, profile: profile, patches: patches,
+                executable: dsh, profile: options.profile, patches: options.patches,
                 workingDirectory: FileManager.default.currentDirectoryPath))
+    }
+
+    /// Speech (or a file) → text.
+    static func transcribeQuestion(_ clip: URL, _ options: VoiceOptions) async throws -> String {
+        print("→ transcribing…")
+        return try await sttBackend().transcribe(
+            audio: clip, language: options.language, model: options.model, useTimestamps: false
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// One turn: ask DSH in `session`, print and speak the answer, return the
+    /// session id to continue with.
+    static func converse(
+        _ question: String, session: String?, client: DSHClient, options: VoiceOptions
+    ) async throws -> String? {
+        print("🗣  \(question)")
+        print("→ DeepSeek Harness is working…")
+        let reply = try await client.ask(question, session: session)
+        print("🤖 \(reply.text.isEmpty ? "[no answer]" : reply.text)")
+        if options.speak, !reply.text.isEmpty {
+            if options.engine == "say" {
+                try await sayAloud(reply.text, voice: options.voice)
+            } else {
+                var ttsArgs = ["--text", reply.text, "--engine", options.engine]
+                if let voice = options.voice { ttsArgs += ["--voice", voice] }
+                try await runTTS(ttsArgs)
+            }
+        }
+        return reply.sessionID
+    }
+
+    /// Talk to DSH: speech in → whisper → `dsh --profile headless` → speech out.
+    ///
+    ///   voicebridge-cli ask                       listen 8 s, ask, speak the answer
+    ///   voicebridge-cli ask --listen 15 --loop    hands-free conversation (one session)
+    ///   voicebridge-cli ask --audio q.m4a         a recorded question
+    ///   voicebridge-cli ask --text "你好"          skip STT (no mic needed)
+    ///   voicebridge-cli ask --session <id> …      continue an earlier conversation
+    ///
+    /// Options: --lang zh|en|… (default auto), --model M, --engine say|piper|edge|…
+    /// (default `say`), --voice V, --profile P (default headless), --patch FILE
+    /// (repeatable; e.g. selects the DSH model), --no-speak (print only).
+    static func runAsk(_ args: [String]) async throws {
+        let options = VoiceOptions(args)
+        let client = try makeDSHClient(options)
+        var session = options.session
 
         repeat {
-            // 1. The question, as text.
             let question: String
-            if let text {
+            if let text = options.text {
                 question = text
             } else {
                 let clip: URL
-                if let audio {
+                if let audio = options.audio {
                     clip = try prepareAudio(audio)
                 } else {
-                    clip = try await recordClip(seconds: listenSeconds)
+                    clip = try await recordClip(seconds: options.listenSeconds)
                 }
-                print("→ transcribing…")
-                question = try await sttBackend().transcribe(
-                    audio: clip, language: language, model: model, useTimestamps: false
-                ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+                question = try await transcribeQuestion(clip, options)
             }
             guard !question.isEmpty else {
                 print("[heard nothing]")
-                if loop { continue } else { return }
+                if options.loop { continue } else { return }
             }
-            print("🗣  \(question)")
+            // `--loop` turns are one conversation: each continues the session
+            // the previous turn created, so DSH remembers what was said.
+            session = try await converse(
+                question, session: session, client: client, options: options)
+        } while options.loop && options.text == nil && options.audio == nil
 
-            // 2. Ask DSH.
-            print("→ asking DeepSeek Harness (\(profile))…")
-            let answer = try await client.ask(question)
-            print("🤖 \(answer.isEmpty ? "[no answer]" : answer)")
+        if let session { print("session: \(session)  (continue with --session \(session))") }
+    }
 
-            // 3. Speak the answer.
-            if speak, !answer.isEmpty {
-                if engine == "say" {
-                    try await sayAloud(answer, voice: voice)
+    /// An interactive conversation with DSH, by voice or keyboard.
+    ///
+    ///   voicebridge-cli chat [--listen S] [--patch FILE] [--session ID] …
+    ///
+    /// Each turn: press Enter to speak (recorded for --listen seconds), or type
+    /// a message. Every turn continues the same DSH session, so DSH keeps the
+    /// history, its tool results and the files it touched — you can ask it to
+    /// change something, then say "now run the tests", then "commit that".
+    ///   /new       start a fresh session
+    ///   /session   print the session id (resume later with --session)
+    ///   /mute      toggle speaking the answers
+    ///   /quit      leave
+    static func runChat(_ args: [String]) async throws {
+        var options = VoiceOptions(args)
+        let client = try makeDSHClient(options)
+        var session = options.session
+
+        print(
+            """
+            VoiceBridge ↔ DeepSeek Harness — working in \(FileManager.default.currentDirectoryPath)
+              Enter = speak (\(Int(options.listenSeconds)) s) · type a message · /new · /session · /mute · /quit
+            """)
+        if let session { print("  resuming session \(session)") }
+
+        while true {
+            print("you › ", terminator: "")
+            fflush(stdout)
+            guard let line = readLine(strippingNewline: true) else { break }  // EOF
+            let typed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            switch typed {
+            case "/quit", "/exit", "/q":
+                if let session { print("session: \(session)") }
+                return
+            case "/new":
+                session = nil
+                print("— new session —")
+                continue
+            case "/session":
+                print(session.map { "session: \($0)" } ?? "no session yet")
+                continue
+            case "/mute":
+                options.speak.toggle()
+                print(options.speak ? "🔊 speaking answers" : "🔇 answers muted")
+                continue
+            default:
+                break
+            }
+
+            // A turn that fails (no mic, DSH error) must not end the chat.
+            do {
+                let question: String
+                if typed.isEmpty {
+                    let clip = try await recordClip(seconds: options.listenSeconds)
+                    question = try await transcribeQuestion(clip, options)
+                    guard !question.isEmpty else {
+                        print("[heard nothing]")
+                        continue
+                    }
                 } else {
-                    var ttsArgs = ["--text", answer, "--engine", engine]
-                    if let voice { ttsArgs += ["--voice", voice] }
-                    try await runTTS(ttsArgs)
+                    question = typed
                 }
+                session = try await converse(
+                    question, session: session, client: client, options: options)
+            } catch {
+                print("❌ \(error.localizedDescription)")
             }
-            // A fixed question or file is a single turn.
-        } while loop && text == nil && audio == nil
+        }
     }
 
     /// Speak with macOS `say`, choosing a Chinese voice for Chinese text.
@@ -587,6 +685,8 @@ struct Main {
                    `... | voicebridge-cli tts` [--engine ...]  speak piped text
              ask   [--listen S] [--loop] [--audio F] [--text T] [--lang L] [--patch P]
                    voice interface for DeepSeek Harness: speak → dsh → hear the answer
+             chat  [--listen S] [--patch P] [--session ID]
+                   talk to DSH by voice or keyboard; every turn continues one session
              ping                            show engine, model, & mic availability
              --version                       print the version
              help                            this menu
