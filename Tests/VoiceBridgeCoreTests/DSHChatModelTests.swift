@@ -294,7 +294,9 @@ final class DSHChatModelTests: XCTestCase {
 
         XCTAssertEqual(dsh.calls.first?.session, "session-kept", "the turn resumes what was stored")
         XCTAssertEqual(saved.pairs.last?.folder, folder.path)
-        XCTAssertEqual(saved.pairs.last?.session ?? nil, "session-1", "the new id is persisted")
+        XCTAssertEqual(
+            saved.pairs.last?.session ?? nil, "session-kept",
+            "the resumed id is persisted for this folder")
 
         model.newConversation()
         XCTAssertFalse(saved.pairs.isEmpty)
