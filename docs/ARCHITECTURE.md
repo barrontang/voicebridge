@@ -167,10 +167,23 @@ three bugs. They now both use `ProcessRunner`:
 ## Pluggable engine contracts
 
 - **`WhisperBackend`** — `transcribe(audio:language:model:useTimestamps:)`.
-  Shipped impl: `WhisperCliBackend` (out-of-process `whisper-cli`).
+  Shipped impls: `WhisperCliBackend` (out-of-process `whisper-cli`),
+  `WhisperServerBackend` (a resident `whisper-server`), `QwenAsrBackend`
+  (Qwen3-ASR on a resident `llama-server`).
 - **`StreamingWhisperBackend`** — `transcribe(samples:sampleRate:startTime:…)`
-  for the live path. Shipped impl: `WindowedWhisperAdapter`, which wraps the
-  file backend and maps whisper's timed segments into absolute time.
+  for the live path. Shipped impls: `WindowedWhisperAdapter`, which wraps any
+  file backend and maps its timed segments into absolute time, and
+  `TieredWhisperAdapter`, which routes a partial window to the fast model and a
+  committed utterance to the accurate one.
+- **`SttEngineSettings`** — which engine, and which tiers, both paths must use.
+  `makeBackend` is the single place a backend is constructed, so push-to-talk
+  and live captions cannot drift apart. `SttEngineKind.isProvablyLocal` is the
+  one answer to "does recognition leave the Mac?".
+- **`QwenAsrServer`** — an actor that owns the `llama-server` processes. It
+  launches on demand on an ephemeral 127.0.0.1 port, polls `/health`, stops a
+  server after 5 minutes idle, and tries the next `llama-server` candidate when
+  one fails to load (a pre-b8769 build dies with "unknown model architecture:
+  qwen3vl", which is otherwise indistinguishable from a corrupt model).
 - **`TTSBackend`** — `synthesize(text:voice:outputPath:)`, `producesAudioFile`,
   `isAvailable()`, `displayName`, `requiresNetwork`, `preferredFileExtension`.
   Shipped impls: `PiperBackend`, `KokoroBackend`, `EdgeTTSBackend`,

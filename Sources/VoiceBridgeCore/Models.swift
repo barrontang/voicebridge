@@ -44,20 +44,33 @@ public enum SttModel: String, CaseIterable, Codable, Sendable {
 public struct Transcription: Sendable, Equatable {
     public let text: String
     public let language: String
-    public let model: SttModel
+    /// Which whisper model produced this, or `nil` when the engine is not a
+    /// whisper one (Qwen3-ASR). `SttModel` names a `.bin` on disk that the
+    /// whisper backends open; forcing a Qwen result into that enum would put
+    /// a model name in the UI that never ran.
+    public let model: SttModel?
     public let durationSeconds: Double
     public let realtimeFactor: Double  // wallclock / audio length; <1 means faster
     /// Per-segment transcript with its time range inside the audio file.
     /// Empty when the engine produced no usable timings (older whisper builds).
     public let segments: [WhisperTranscriptParser.TimedSegment]
+    /// What to show a human ("Qwen3-ASR 0.6B"). Backends that are not whisper
+    /// set this; `model` alone cannot describe them.
+    public let engineLabel: String?
+    /// Wall-clock time the backend spent on this request. For a local server
+    /// this is the number a user actually feels, and `durationSeconds` is not
+    /// always known (Qwen does not report it).
+    public let wallClockSeconds: Double
 
     public init(
         text: String,
         language: String,
-        model: SttModel,
+        model: SttModel?,
         durationSeconds: Double,
         realtimeFactor: Double,
-        segments: [WhisperTranscriptParser.TimedSegment] = []
+        segments: [WhisperTranscriptParser.TimedSegment] = [],
+        engineLabel: String? = nil,
+        wallClockSeconds: Double = 0
     ) {
         self.text = text
         self.language = language
@@ -65,6 +78,15 @@ public struct Transcription: Sendable, Equatable {
         self.durationSeconds = durationSeconds
         self.realtimeFactor = realtimeFactor
         self.segments = segments
+        self.engineLabel = engineLabel
+        self.wallClockSeconds = wallClockSeconds
+    }
+
+    /// The engine to name in a status line.
+    public var label: String {
+        if let engineLabel { return engineLabel }
+        if let model { return model.label }
+        return "Speech"
     }
 
     public var isMeaningful: Bool {

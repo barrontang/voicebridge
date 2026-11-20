@@ -34,6 +34,10 @@
     misheard, using the preceding sentences. Word-level, guarded, and it never rewrites a
     sentence — a change that edits too much is rejected and the raw text stays.
   - **Push-to-talk**: record a clip, transcribe it.
+  - **Qwen3-ASR** (optional engine): Alibaba's open-weight 52-language model, running locally
+    on `llama.cpp`. Two sizes — **0.6B** for live partials, **1.7B** for the final text — and
+    you can run both at once. Measured on an M4 Pro: a 1.5 s window comes back in ~40 ms,
+    20 s of audio in ~280 ms. No cloud, no API key, no Python.
   - **Any input format**: mp3, m4a, aiff, wav, … are transcoded to whisper's shape automatically.
   - **Batch mode**: transcribe a whole folder from the CLI.
   - **Server mode**: point `VOICEBRIDGE_WHISPER_SERVER` at a local `whisper-server` and the
@@ -52,7 +56,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  203 unit tests run in CI in under a second.
+  227 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 - **🤖 Voice chat with DeepSeek Harness** — a chat window in the app (⇧⌘D) and `voicebridge-cli chat`: talk to
@@ -88,6 +92,9 @@ brew install whisper-cpp                 # the STT engine
 ./scripts/fetch-whisper-turbo.sh         # ~1.6 GB, ggml-large-v3-turbo
 ./scripts/install-piper.sh               # Piper runtime + en/zh voices
 # …or skip both: the app can download the models for you (Settings → Download models)
+
+# Optional: Qwen3-ASR instead of whisper (needs a recent llama.cpp)
+./scripts/install-llama.sh               # pinned, checksum-verified build
 
 # 3. Try the CLI
 .build/release/voicebridge-cli ping
@@ -154,17 +161,67 @@ folder, and the model downloads.
 
 ---
 
+## 🎙️ Qwen3-ASR (optional speech engine)
+
+Qwen3-ASR is Alibaba's open-weight recogniser (Apache-2.0): 30 languages plus 22
+Chinese dialects including Cantonese, one model for both offline files and
+streaming. VoiceBridge runs it on `llama.cpp`, which means **no Python, no CUDA,
+no API key, and nothing leaves the Mac** — `llama-server` binds `127.0.0.1` and
+there is no setting that points it elsewhere.
+
+**Setup**
+
+```bash
+scripts/install-llama.sh          # pinned llama.cpp build, checksum-verified
+# then: Settings → Speech recognition → Engine → Qwen3-ASR, and download a model
+```
+
+`brew install llama.cpp` also works, but the Qwen3-ASR architecture (`qwen3vl`)
+only exists in builds after b8769. An older binary starts happily and then fails
+with `unknown model architecture: 'qwen3vl'`, which reads like a corrupt model
+rather than a stale tool — so the script pins a build, and the app prefers it
+over `$PATH`.
+
+**Two sizes, and the choice is per-pass**
+
+| Tier | Disk | Latency on an M4 Pro | Use it for |
+|---|---|---|---|
+| 0.6B Q8_0 | 1.0 GB (768 MB + 208 MB projector) | 1.5 s window → ~40 ms | live partials, single-model use |
+| 1.7B Q8_0 | 2.4 GB (2.0 GB + 352 MB projector) | 20 s audio → ~570 ms | the final text |
+
+Turn on **“Use the 1.7B model for the final text”** and the live view streams
+partials from the small model while each finished sentence is re-transcribed by
+the big one — the same trick the official pipeline uses to close the ~2 pp gap
+between streaming and offline quality.
+
+Each tier is **two files**: the weights and an `mmproj-…` audio projector. The
+catalog installs both; a lone `.gguf` produces a server that starts and then
+fails every request.
+
+**Things worth knowing**
+
+- **No inverse text normalisation.** “一百二十万元” stays as Chinese characters
+  instead of becoming “120 万元”. whisper.cpp does the same thing, so this is not
+  a regression — it is just not the behaviour the model card advertises.
+- **A very short silent clip can hallucinate** (0.3 s of silence → “嗯。”). Live
+  windows are ≥1.2 s, and a 2 s silence returns empty text with no language.
+- **No word-level timestamps.** The live path segments by utterance and labels
+  each caption with its window's time span, so the reconciler still works; it is
+  coarser than whisper.cpp's per-segment offsets.
+
+---
+
 ## 📁 Project Layout
 
 | Path | Description |
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 203 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 227 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |
-| `scripts/` | `build.sh` · `dev-check.sh` · `install-cli.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `make-icon.sh` · `verify-catalog.sh` |
+| `scripts/` | `build.sh` · `dev-check.sh` · `install-cli.sh` · `install-llama.sh` · `fetch-whisper-turbo.sh` · `install-piper.sh` · `make-app.sh` · `make-icon.sh` · `verify-catalog.sh` |
 | `skills/voicebridge-tts/` | An agent skill: pipe any text into `voicebridge-cli tts`. |
 
 ---
@@ -214,6 +271,10 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design rationale
 
 - The microphone audio **never leaves the machine**.
 - Piper, Kokoro and the built-in voice run entirely offline.
+- **Speech recognition is local too.** whisper.cpp is a local binary, and Qwen3-ASR
+  runs on a `llama-server` bound to `127.0.0.1` with no setting that can point it at
+  another host. `SttEngineKind.isProvablyLocal` is the one answer to "does this
+  engine transmit the audio?"; a test pins it.
 - **Edge TTS is online; Drama 3 is online only when its server is.** The app asks
   before the first send and shows a notice in the status line. A Drama 3 server on
   `127.0.0.1` keeps the text on this Mac and needs no consent; a server on another
@@ -308,8 +369,14 @@ scripts/dev-check.sh        # every gate CI runs, in CI order
 
 ### Adding a new STT engine
 1. Implement `WhisperBackend` (file-based) or `StreamingWhisperBackend` (streaming).
-2. Wire it into `LiveSttSession` / the CLI.
-3. Add a test.
+   A file-based backend gets live captions for free via `WindowedWhisperAdapter`.
+2. Add a case to `SttEngineKind` and build it in `SttEngineSettings.makeBackend` —
+   that is the one place both the live path and push-to-talk ask for an engine, so
+   adding it there wires both.
+3. If it runs as a process or a server, keep it loopback-only and say so in
+   `SttEngineKind.isProvablyLocal` (there is a test).
+4. Add a test. `QwenAsrTests` is the template: pure parsing tests plus one live
+   test behind an environment variable.
 
 ### Reporting bugs
 - Open an issue with a minimal reproduction.

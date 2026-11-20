@@ -24,6 +24,17 @@ public struct ModelPaths: Sendable, Equatable {
     /// Subdir holding whisper-cpp ggml files.
     public var whisperDir: URL { root.appendingPathComponent("whisper", isDirectory: true) }
 
+    /// Subdir holding the Qwen3-ASR GGUFs and their audio projectors.
+    ///
+    /// Sits beside `root` rather than inside it: `root` is the *tts* layer of
+    /// `~/.voicebridge/models`, and `stt/qwen3` is where the model catalog and
+    /// the CLI installer both put these files.
+    public var qwen3Dir: URL {
+        root.deletingLastPathComponent()
+            .appendingPathComponent("stt", isDirectory: true)
+            .appendingPathComponent("qwen3", isDirectory: true)
+    }
+
     /// Subdir holding Piper voice `.onnx` files.
     public var piperVoiceDir: URL {
         root

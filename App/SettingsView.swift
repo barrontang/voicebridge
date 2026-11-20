@@ -32,6 +32,15 @@ struct SettingsView: View {
     @AppStorage(DSHSettings.timeoutKey) private var dshTimeout = DSHSettings.defaultTimeout
     @State private var detectedDSH: String?
 
+    // Speech-to-text. Shared with the main window through `SttEngineSettings`.
+    @AppStorage(SttEngineSettings.Keys.kind) private var sttEngineRaw =
+        SttEngineKind.whisperCLI.rawValue
+    @AppStorage(SttEngineSettings.Keys.qwenTier) private var qwenTierRaw =
+        QwenAsrTier.fast.rawValue
+    /// Empty = one model for everything; otherwise the tier for the final pass.
+    @AppStorage(SttEngineSettings.Keys.qwenFinalTier) private var qwenFinalTierRaw = ""
+    @State private var detectedLlama: String?
+
     /// A short human description of the currently-selected TTS engine.
     private var ttsEngineBlurb: String {
         switch ttsConfig.selectedMode {
@@ -88,6 +97,7 @@ struct SettingsView: View {
             ttsConfig.scan()
             ttsConfig.scanSttModels()
             detectDSH()
+            detectLlama()
             // After a download, the model lists (and the main page) must be
             // refreshed - otherwise a freshly installed model stays invisible.
             downloads.onInstalled = {
@@ -160,20 +170,32 @@ struct SettingsView: View {
         GroupBox("Speech-to-text engine") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(
-                    "This whisper model is used by both the push-to-talk and "
-                        + "live (streaming) transcription on the main page. "
-                        + "Bigger = more accurate. A model must be downloaded to "
-                        + "disk before it can be used."
+                    "Used by both push-to-talk and live (streaming) transcription "
+                        + "on the main page. whisper.cpp needs a ggml model on disk; "
+                        + "Qwen3-ASR needs its GGUF pair and llama.cpp."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                Picker("Model", selection: $ttsConfig.selectedSttModel) {
-                    ForEach(SttModel.allCases, id: \.rawValue) { m in
-                        Text(sttModelLabel(m)).tag(m)
+                Picker("Engine", selection: $sttEngineRaw) {
+                    ForEach(SttEngineKind.allCases, id: \.self) { kind in
+                        Text(kind.displayName).tag(kind.rawValue)
                     }
                 }
-                .help("The whisper model used to transcribe speech.")
+                .help(
+                    "Qwen3-ASR runs on llama.cpp, stays on this Mac, and handles "
+                        + "30 languages plus 22 Chinese dialects including Cantonese.")
+
+                if sttEngineRaw == SttEngineKind.qwen3.rawValue {
+                    qwenControls
+                } else {
+                    Picker("Model", selection: $ttsConfig.selectedSttModel) {
+                        ForEach(SttModel.allCases, id: \.rawValue) { m in
+                            Text(sttModelLabel(m)).tag(m)
+                        }
+                    }
+                    .help("The whisper model used to transcribe speech.")
+                }
 
                 Picker("Language", selection: $ttsConfig.selectedSttLanguage) {
                     Text("Auto-detect").tag(String?.none)
@@ -253,8 +275,83 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Group 3: downloads
+    /// Everything that only matters when Qwen3-ASR is the chosen engine.
+    @ViewBuilder private var qwenControls: some View {
+        Picker("Model", selection: $qwenTierRaw) {
+            ForEach(QwenAsrTier.allCases, id: \.rawValue) { tier in
+                Text(tier.displayName).tag(tier.rawValue)
+            }
+        }
+        .help("Both tiers are the same family; 0.6B is ~2× faster, 1.7B is more accurate.")
 
+        Toggle("Use the 1.7B model for the final text", isOn: twoTierBinding)
+            .disabled(qwenTierRaw == QwenAsrTier.accurate.rawValue)
+            .help(
+                "Partial captions stream from the fast model; a finished sentence is "
+                    + "re-transcribed by the larger one. Costs a second server in memory.")
+
+        LabeledContent("Weights") {
+            Text(qwenWeightsStatus)
+                .font(.caption)
+                .textSelection(.enabled)
+        }
+
+        LabeledContent("llama-server") {
+            Text(detectedLlama ?? "not found")
+                .font(.caption)
+                .textSelection(.enabled)
+                .foregroundStyle(detectedLlama == nil ? Color.orange : Color.secondary)
+        }
+
+        HStack(spacing: 6) {
+            Button("Find llama.cpp") { detectLlama() }
+            Spacer()
+            LabeledContent("Qwen dir") {
+                Text(ttsConfig.paths.qwen3Dir.path)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+        }
+
+        Text(
+            "Runs entirely on this Mac: llama-server binds 127.0.0.1 only, and "
+                + "there is no setting that points it elsewhere. Nothing is sent "
+                + "anywhere — not the audio, not the transcript."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// "on" when both files of the selected tier (and the final tier) exist.
+    private var qwenWeightsStatus: String {
+        var tiers = [qwenTierRaw]
+        if !qwenFinalTierRaw.isEmpty { tiers.append(qwenFinalTierRaw) }
+        let missing = tiers.compactMap(QwenAsrTier.init(rawValue:)).filter { tier in
+            let dir = ttsConfig.paths.qwen3Dir
+            let weights = dir.appendingPathComponent(tier.modelFileName)
+            let projector = dir.appendingPathComponent(tier.mmprojFileName)
+            return
+                !(FileManager.default.fileExists(atPath: weights.path)
+                && FileManager.default.fileExists(atPath: projector.path))
+        }
+        return missing.isEmpty
+            ? "ready" : "missing \(missing.map(\.shortLabel).joined(separator: ", "))"
+    }
+
+    /// Empty storage means "one model for everything".
+    private var twoTierBinding: Binding<Bool> {
+        Binding(
+            get: { qwenFinalTierRaw == QwenAsrTier.accurate.rawValue },
+            set: { on in
+                qwenFinalTierRaw = on ? QwenAsrTier.accurate.rawValue : ""
+            })
+    }
+
+    private func detectLlama() {
+        detectedLlama = try? QwenAsrServer.locateExecutable()
+    }
+
+    // MARK: - Group 3: downloads
     private var downloadGroup: some View {
         GroupBox("Download models") {
             VStack(alignment: .leading, spacing: 10) {
@@ -266,6 +363,9 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
 
                 ForEach(downloads.rows(for: ModelCatalog.stt, in: ttsConfig.paths)) { row in
+                    downloadRow(row)
+                }
+                ForEach(downloads.rows(for: ModelCatalog.qwen, in: ttsConfig.paths)) { row in
                     downloadRow(row)
                 }
                 ForEach(downloads.rows(for: ModelCatalog.tts, in: ttsConfig.paths)) { row in

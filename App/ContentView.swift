@@ -42,6 +42,12 @@ struct ContentView: View {
     @State private var sttModel: SttModel?
     /// The live-caption session (mic -> router -> whisper -> transcript).
     @StateObject private var live = LiveSttSession()
+    /// One Qwen3-ASR server manager for the whole app.
+    ///
+    /// It must outlive a single listening session: loading 0.6B/1.7B takes a
+    /// second or two, and a fresh manager per recording would pay that every
+    /// time. The manager stops idle servers on its own.
+    @State private var qwenServerStorage: QwenAsrServer?
     /// The push-to-talk recorder (mic -> router -> 16 kHz WAV).
     @StateObject private var recorder = PushToTalkSession()
 
@@ -539,34 +545,43 @@ struct ContentView: View {
         sttPhase = .transcribing
         sttStatus = "Transcribing…"
 
-        let model = sttModel ?? availableSttModel()
         Task {
             do {
                 // `stop()` finalizes the WAV off the main thread and resolves
                 // only once the file is complete (no "sleep and hope it flushed").
                 let stopped = await recorder.stop()
                 let audioURL = stopped ?? recorder.outputURL
-                guard let model, let audioURL,
+                guard let audioURL,
                     FileManager.default.fileExists(atPath: audioURL.path)
                 else {
                     sttPhase = .idle
                     sttStatus = "No audio on disk - check mic & permission."
                     return
                 }
-                // The backend must resolve models from the *configured*
-                // root, not the built-in default.
-                let t = try await WhisperCliBackend(modelDirectory: ttsConfig.paths.whisperDir)
-                    .transcribe(
-                        audio: audioURL,
-                        language: ttsConfig.selectedSttLanguage,
-                        model: model,
-                        useTimestamps: false)
+                // Which engine runs is a setting; the whisper model only
+                // matters for the whisper engines (`makeBackend` ignores it
+                // for Qwen3-ASR), so a Qwen-only install must not be blocked
+                // on "no whisper model on disk".
+                let settings = SttEngineSettings.load()
+                let model = sttModel ?? availableSttModel() ?? .tiny
+                let backend = try await settings.makeBackend(
+                    modelDirectory: ttsConfig.paths.whisperDir,
+                    whisperServerURL: WhisperServerBackend.fromEnvironment()?.baseURL,
+                    qwenServer: sharedQwenServer())
+                let t = try await backend.transcribe(
+                    audio: audioURL,
+                    language: ttsConfig.selectedSttLanguage,
+                    model: model,
+                    useTimestamps: false)
                 lastPushToTalkTranscript = t.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 sttPhase = .idle
-                sttStatus =
-                    "Recognized · \(t.model.label) · "
-                    + String(format: "%.1fs", t.durationSeconds)
-                    + " · \(t.language)"
+                // Qwen3-ASR does not report the audio duration, so fall back
+                // to the wall clock rather than printing "0.0s".
+                let timing =
+                    t.durationSeconds > 0
+                    ? String(format: "%.1fs", t.durationSeconds)
+                    : String(format: "%.2fs", t.wallClockSeconds)
+                sttStatus = "Recognized · \(t.label) · \(timing) · \(t.language)"
             } catch {
                 sttPhase = .idle
                 sttStatus = "Transcribe failed: \(error.localizedDescription)"
@@ -634,6 +649,18 @@ struct ContentView: View {
         return nil
     }
 
+    /// The shared Qwen3-ASR server manager, created on first use.
+    ///
+    /// Rebuilt if the model folder changed since it was made, so pointing
+    /// Settings at another folder takes effect without a relaunch.
+    @MainActor private func sharedQwenServer() -> QwenAsrServer {
+        if let qwenServerStorage { return qwenServerStorage }
+        let server = QwenAsrServer(
+            configuration: .init(modelDirectory: ttsConfig.paths.qwen3Dir))
+        qwenServerStorage = server
+        return server
+    }
+
     // Resolve the model to use: prefer the Settings choice when it is on
     // disk, else the first whisper model present, else nil. Also sync the
     // live stream's model when it is idle.
@@ -666,6 +693,10 @@ struct ContentView: View {
                 // Contextual correction is opt-in and loopback-only.
                 corrector: ttsConfig.correctionEnabled
                     ? LocalLLMCorrector(model: ttsConfig.correctionModel)
-                    : nil))
+                    : nil,
+                // Read at apply time so a change in Settings takes effect on
+                // the next start rather than after a relaunch.
+                engine: SttEngineSettings.load(),
+                qwenServer: sharedQwenServer()))
     }
 }

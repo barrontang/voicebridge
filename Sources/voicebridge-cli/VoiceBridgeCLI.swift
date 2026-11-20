@@ -73,7 +73,7 @@ struct Main {
         print("—")
         print(t.text)
         print("—")
-        var meta = "lang=\(t.language)  model=\(t.model.rawValue)"
+        var meta = "lang=\(t.language)  model=\(t.model?.rawValue ?? t.label)"
         if t.durationSeconds > 0 {
             meta +=
                 "  audio=\(String(format: "%.2f", t.durationSeconds))s"

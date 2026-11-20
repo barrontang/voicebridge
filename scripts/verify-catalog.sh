@@ -33,6 +33,12 @@ import re, subprocess, sys, json
 path, fix = sys.argv[1], sys.argv[2] == "1"
 src = open(path).read()
 
+# `swift-format` may wrap a long URL onto the next line:
+#     remoteURL: url(
+#         "\(base)/some/long/name.gguf"),
+# Collapse that back so the per-line scan below still sees `url("…")`.
+src = re.sub(r'url\(\s*\n\s*"', 'url("', src)
+
 entries, cur = [], {}
 bases = dict(re.findall(r'let\s+(\w+Base)\s*=\s*"([^"]+)"', src))
 if not bases:

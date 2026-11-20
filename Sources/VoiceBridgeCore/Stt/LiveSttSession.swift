@@ -53,6 +53,14 @@ public final class LiveSttSession: ObservableObject {
         /// talks to it instead of spawning `whisper-cli` per window (the
         /// model stays resident - no process spawn, no model load).
         public var serverURL: URL?
+        /// Which engine to use, and (for Qwen3-ASR) which tiers.
+        ///
+        /// Ignored when it names an engine whose prerequisites are missing —
+        /// `startPipeline` falls back to whisper.cpp rather than refusing to
+        /// listen, because a captionless live view is worse than a wrong model.
+        public var engine: SttEngineSettings
+        /// The Qwen3-ASR server manager, when the app has one.
+        public var qwenServer: QwenAsrServer?
 
         public init(
             model: SttModel = .largeV3Turbo,
@@ -63,7 +71,9 @@ public final class LiveSttSession: ObservableObject {
             windowSeconds: TimeInterval = 4.0,
             ringBufferSeconds: TimeInterval = 60.0,
             serverURL: URL? = nil,
-            corrector: (any TranscriptCorrector)? = nil
+            corrector: (any TranscriptCorrector)? = nil,
+            engine: SttEngineSettings = SttEngineSettings(),
+            qwenServer: QwenAsrServer? = nil
         ) {
             self.model = model
             self.language = language
@@ -74,6 +84,8 @@ public final class LiveSttSession: ObservableObject {
             self.ringBufferSeconds = ringBufferSeconds
             self.serverURL = serverURL
             self.corrector = corrector
+            self.engine = engine
+            self.qwenServer = qwenServer
         }
     }
 
@@ -179,23 +191,63 @@ public final class LiveSttSession: ObservableObject {
 
     // MARK: - Pipeline
 
+    /// Build the streaming backend the configuration asks for.
+    ///
+    /// A `whisperServer` setting with no URL configured degrades to the CLI
+    /// backend instead of throwing: the URL comes from the environment, so
+    /// "selected but not running" is a normal state, not an error.
+    private func makeStreamingBackend(
+        _ config: Configuration
+    ) async throws -> any StreamingWhisperBackend {
+        if config.engine.kind == .whisperServer, config.serverURL == nil {
+            return WindowedWhisperAdapter(
+                fileBackend: WhisperCliBackend(modelDirectory: config.modelDirectory),
+                scratchDir: config.scratchDir)
+        }
+
+        let fast = try await config.engine.makeBackend(
+            modelDirectory: config.modelDirectory,
+            whisperServerURL: config.serverURL,
+            qwenServer: config.qwenServer,
+            tier: config.engine.qwenTier)
+
+        guard config.engine.usesTwoTiers else {
+            return WindowedWhisperAdapter(
+                fileBackend: fast, scratchDir: config.scratchDir)
+        }
+
+        let accurate = try await config.engine.makeBackend(
+            modelDirectory: config.modelDirectory,
+            whisperServerURL: config.serverURL,
+            qwenServer: config.qwenServer,
+            tier: config.engine.finalTierOrFast)
+        return TieredWhisperAdapter(
+            partialBackend: fast, finalBackend: accurate, scratchDir: config.scratchDir)
+    }
+
     private func startPipeline() async throws {
         let config = configuration
 
         // The engine + view model are built per session so a restart starts
         // from a clean transcript.
         //
-        // A local whisper.cpp server (when configured) keeps the model
-        // resident, so the live path does not spawn a process per window.
-        let fileBackend: any WhisperBackend
-        if let serverURL = config.serverURL {
-            fileBackend = WhisperServerBackend(baseURL: serverURL)
-        } else {
-            fileBackend = WhisperCliBackend(modelDirectory: config.modelDirectory)
+        // A resident backend (whisper-server, or llama-server running
+        // Qwen3-ASR) keeps the model in memory, so the live path does not
+        // spawn a process per window. Qwen3-ASR additionally gets a second,
+        // larger model for the final pass when the user asked for two tiers.
+        let backend: any StreamingWhisperBackend
+        do {
+            backend = try await makeStreamingBackend(config)
+        } catch {
+            // A Qwen3 user who has not installed the models yet should still
+            // get captions. Whisper is local too, so this is not a privacy
+            // change — just a quieter failure.
+            guard config.engine.kind == .qwen3 else { throw error }
+            status = "Qwen3-ASR unavailable (\(error.localizedDescription)) — using whisper."
+            backend = WindowedWhisperAdapter(
+                fileBackend: WhisperCliBackend(modelDirectory: config.modelDirectory),
+                scratchDir: config.scratchDir)
         }
-        let backend = WindowedWhisperAdapter(
-            fileBackend: fileBackend,
-            scratchDir: config.scratchDir)
         let engineConfig = config.engineConfig
         let engine = LiveTranscriptEngine(
             backend: backend, config: engineConfig, corrector: config.corrector)

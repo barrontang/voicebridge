@@ -10,6 +10,7 @@ public struct DownloadableModel: Identifiable, Sendable, Equatable {
 
     public enum Kind: String, Sendable {
         case stt  // a whisper.cpp ggml model
+        case sttQwen  // a Qwen3-ASR GGUF, served by llama-server
         case tts  // a Piper voice
     }
 
@@ -63,9 +64,14 @@ public struct DownloadableModel: Identifiable, Sendable, Equatable {
     }
 
     /// The destination inside a model root.
+    ///
+    /// Standardized because the Qwen3-ASR entries live one level *up* from the
+    /// tts root (`../stt/qwen3`); without this the path would carry `..` and
+    /// never compare equal to the directory the server reads from.
     public func destination(in root: ModelPaths) -> URL {
         root.root.appendingPathComponent(relativeDirectory, isDirectory: true)
             .appendingPathComponent(fileName)
+            .standardizedFileURL
     }
 }
 
@@ -77,6 +83,8 @@ public enum ModelCatalog {
     /// BELLE-2's Chinese fine-tune, published as a whisper.cpp ggml.
     private static let belleZhBase =
         "https://huggingface.co/BELLE-2/Belle-whisper-large-v3-turbo-zh-ggml/resolve/main"
+    /// Qwen3-ASR GGUFs, converted and published by the llama.cpp project.
+    private static let qwenBase = "https://huggingface.co/ggml-org"
 
     /// A URL built from a literal. A malformed literal is a programming
     /// error (not a runtime condition), so it traps instead of silently
@@ -214,8 +222,57 @@ public enum ModelCatalog {
             ]),
     ]
 
+    /// Qwen3-ASR speech-to-text models.
+    ///
+    /// Each tier is **two files**: the weights and the audio projector
+    /// (`mmproj-…`) that turns audio into tokens for them. Downloading only
+    /// the first produces a server that starts and then fails every request,
+    /// which is why the projector is a `companion` and not an optional extra.
+    ///
+    /// The URLs are written out in full rather than composed from
+    /// `QwenAsrTier`, because `scripts/verify-catalog.sh` reads this table
+    /// textually — an interpolated URL would be skipped by the verifier, which
+    /// is exactly the kind of silent rot that script exists to catch.
+    /// `QwenAsrTests` keeps these file names in step with the tier enum.
+    public static let qwen: [DownloadableModel] = [
+        DownloadableModel(
+            id: "qwen3-asr-0.6b",
+            displayName: "Qwen3-ASR 0.6B · fastest, 30 languages + 22 dialects",
+            kind: .sttQwen,
+            fileName: QwenAsrTier.fast.modelFileName,
+            relativeDirectory: "../stt/qwen3",
+            remoteURL: url(
+                "\(qwenBase)/Qwen3-ASR-0.6B-GGUF/resolve/main/Qwen3-ASR-0.6B-Q8_0.gguf"),
+            byteSize: 804_749_248,
+            sha256: "bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971",
+            companions: [
+                DownloadableModel.Companion(
+                    fileName: QwenAsrTier.fast.mmprojFileName,
+                    remoteURL: url(
+                        "\(qwenBase)/Qwen3-ASR-0.6B-GGUF/resolve/main/mmproj-Qwen3-ASR-0.6B-Q8_0.gguf"
+                    ))
+            ]),
+        DownloadableModel(
+            id: "qwen3-asr-1.7b",
+            displayName: "Qwen3-ASR 1.7B · most accurate",
+            kind: .sttQwen,
+            fileName: QwenAsrTier.accurate.modelFileName,
+            relativeDirectory: "../stt/qwen3",
+            remoteURL: url(
+                "\(qwenBase)/Qwen3-ASR-1.7B-GGUF/resolve/main/Qwen3-ASR-1.7B-Q8_0.gguf"),
+            byteSize: 2_165_034_944,
+            sha256: "58e22d0532d4eacaf034cfac17a6fed159f37c41390c710186783be439d1fc57",
+            companions: [
+                DownloadableModel.Companion(
+                    fileName: QwenAsrTier.accurate.mmprojFileName,
+                    remoteURL: url(
+                        "\(qwenBase)/Qwen3-ASR-1.7B-GGUF/resolve/main/mmproj-Qwen3-ASR-1.7B-Q8_0.gguf"
+                    ))
+            ]),
+    ]
+
     /// Everything, STT first.
-    public static var all: [DownloadableModel] { stt + tts }
+    public static var all: [DownloadableModel] { stt + qwen + tts }
 
     /// The catalog entry for a whisper model.
     public static func model(for sttModel: SttModel) -> DownloadableModel? {
