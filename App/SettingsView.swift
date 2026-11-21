@@ -203,10 +203,24 @@ struct SettingsView: View {
                         Text(choice.label).tag(String?.some(choice.id))
                     }
                 }
+                .disabled(!selectedSttEngine.honoursPinnedLanguage)
                 .help(
-                    "Pinning the language is much more accurate than auto-detect, "
-                        + "especially for live captions: a short window is not "
-                        + "enough audio to identify the language reliably.")
+                    selectedSttEngine.honoursPinnedLanguage
+                        ? "Pinning the language is much more accurate than auto-detect, "
+                            + "especially for live captions: a short window is not "
+                            + "enough audio to identify the language reliably."
+                        : "Qwen3-ASR identifies the language itself, so a pin is not sent "
+                            + "to the server. This setting applies to the whisper engines.")
+
+                if !selectedSttEngine.honoursPinnedLanguage {
+                    Text(
+                        "Qwen3-ASR labels every response with the language it detected, "
+                            + "so it needs no pin. Forcing one would relabel the result "
+                            + "without changing the words, which is why it is disabled here."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
 
                 Toggle(
                     "Contextual correction (local LLM)",
@@ -320,6 +334,12 @@ struct SettingsView: View {
         )
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    /// The engine the pickers describe. Falls back to the default when the
+    /// stored raw value is from a newer build.
+    private var selectedSttEngine: SttEngineKind {
+        SttEngineKind(rawValue: sttEngineRaw) ?? .whisperCLI
     }
 
     /// "on" when both files of the selected tier (and the final tier) exist.

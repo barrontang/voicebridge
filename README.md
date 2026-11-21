@@ -56,7 +56,7 @@
   No terminal required.
 - **🗂 A real model folder** — point VoiceBridge at any directory; the choice is remembered.
 - **🧪 Fully testable core** — `VoiceBridgeCore` is a pure SwiftPM library (no SwiftUI, no UIKit);
-  227 unit tests run in CI in under a second.
+  229 unit tests run in CI in under a second.
 - **🖥️ SwiftUI app** — a reference macOS shell that wires the core into a working app.
 - **➡️ Headless CLI** — `voicebridge-cli` for scripting, CI pipelines and smoke tests.
 - **🤖 Voice chat with DeepSeek Harness** — a chat window in the app (⇧⌘D) and `voicebridge-cli chat`: talk to
@@ -208,6 +208,12 @@ fails every request.
 - **No word-level timestamps.** The live path segments by utterance and labels
   each caption with its window's time span, so the reconciler still works; it is
   coarser than whisper.cpp's per-segment offsets.
+- **The language pin belongs to whisper.** Qwen3-ASR labels every response with
+  the language it detected, and the server's `language` field only rewrites that
+  label: English audio forced to `zh` still came back as English, tagged
+  "Chinese", and Cantonese audio was identical whatever was sent. VoiceBridge
+  therefore does not send it, and the Language picker is disabled while this
+  engine is selected.
 
 ---
 
@@ -217,7 +223,7 @@ fails every request.
 |---|---|
 | `Sources/VoiceBridgeCore/` | The library: `Audio/`, `Stt/`, `Tts/`, `DI/`, models. **No SwiftUI.** |
 | `Sources/voicebridge-cli/` | Headless CLI (`stt`, `transcribe`, `tts`, `ping`). |
-| `Tests/VoiceBridgeCoreTests/` | 227 unit tests. |
+| `Tests/VoiceBridgeCoreTests/` | 229 unit tests. |
 | `App/` | The SwiftUI shell (`.app` via `scripts/make-app.sh`). |
 | `Resources/` | The app icon: `AppIcon.icns` plus the two 1024 px masters it is built from. |
 | `docs/` | [`ARCHITECTURE`](docs/ARCHITECTURE.md) · [`RUNBOOK`](docs/RUNBOOK.md) · [`DEVELOPMENT`](docs/DEVELOPMENT.md) |

@@ -35,6 +35,20 @@ public enum SttEngineKind: String, CaseIterable, Codable, Sendable {
         case .whisperServer: return false
         }
     }
+
+    /// True when a pinned language constrains decoding, and is therefore worth
+    /// offering in Settings.
+    ///
+    /// whisper.cpp does: a 1.2 s live window carries too little audio to
+    /// identify a language, so the pin is what keeps captions in the right
+    /// script. Qwen3-ASR does not — it labels every response with the language
+    /// it detected, and the server's `language` form field only rewrites that
+    /// label. Measured against llama-server b12560: English audio forced to
+    /// `zh` came back as English text labelled "Chinese"; Cantonese audio sent
+    /// `yue`, `zh` and no field at all came back identical, labelled
+    /// "Cantonese". Sending the field would therefore mislabel results, not
+    /// steer them, so `QwenAsrBackend` leaves it out.
+    public var honoursPinnedLanguage: Bool { self != .qwen3 }
 }
 
 /// The persisted STT choice, and the factory that turns it into a backend.

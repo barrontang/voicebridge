@@ -87,6 +87,21 @@ final class QwenAsrTests: XCTestCase {
         XCTAssertTrue(text.hasSuffix("--XYZ--\r\n"))
     }
 
+    /// llama-server accepts a `language` field, but it only rewrites the
+    /// `language X<asr_text>` label: English audio forced to `zh` comes back as
+    /// English text tagged "Chinese". So the request must not carry one, and
+    /// this test is here to stop a well-meaning "wire up the pin" change from
+    /// putting it back without re-measuring.
+    func testTheRequestCarriesNoLanguageField() throws {
+        let body = try QwenAsrBackend.multipartBody(
+            boundary: "XYZ", filename: "clip.wav", audio: Data([1, 2, 3]))
+        let text = String(decoding: body, as: UTF8.self)
+        XCTAssertFalse(text.contains("name=\"language\""), "sending it only mislabels the result")
+        XCTAssertEqual(
+            text.components(separatedBy: "Content-Disposition").count - 1, 2,
+            "only `model` and `file` are sent")
+    }
+
     // MARK: - Server argv
 
     func testTheServerBindsLoopbackOnly() {
@@ -209,6 +224,13 @@ final class QwenAsrTests: XCTestCase {
         XCTAssertTrue(SttEngineKind.whisperCLI.isProvablyLocal)
         // Its URL comes from the environment and may name another machine.
         XCTAssertFalse(SttEngineKind.whisperServer.isProvablyLocal)
+    }
+
+    func testOnlyTheWhisperEnginesHonourTheLanguagePin() {
+        XCTAssertTrue(SttEngineKind.whisperCLI.honoursPinnedLanguage)
+        XCTAssertTrue(SttEngineKind.whisperServer.honoursPinnedLanguage)
+        // It detects the language per response; the pin would only relabel it.
+        XCTAssertFalse(SttEngineKind.qwen3.honoursPinnedLanguage)
     }
 
     // MARK: - Two-tier routing

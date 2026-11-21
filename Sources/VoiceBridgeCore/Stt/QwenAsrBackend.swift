@@ -74,6 +74,15 @@ public final class QwenAsrBackend: WhisperBackend, @unchecked Sendable {
     /// The path llama.cpp serves transcriptions on.
     static let transcriptionsPath = "v1/audio/transcriptions"
 
+    /// Transcribe one file.
+    ///
+    /// `language` is deliberately **not** sent to the server. llama-server
+    /// accepts a `language` form field, but it only rewrites the
+    /// `language X<asr_text>` preamble: forcing `zh` on English audio returns
+    /// the English text labelled "Chinese", and Cantonese audio comes back
+    /// identical whatever the field says. The model detects the language
+    /// itself, so the parameter survives only as a fallback label for a
+    /// response that carried no preamble at all.
     public func transcribe(
         audio: URL,
         language: String?,
@@ -207,6 +216,9 @@ public final class QwenAsrBackend: WhisperBackend, @unchecked Sendable {
     }
 
     /// Build the multipart body llama.cpp expects.
+    ///
+    /// Two fields only, on purpose: `model` and `file`. See `transcribe` for
+    /// why `language` is absent even though the endpoint accepts it.
     static func multipartBody(boundary: String, filename: String, audio: Data) throws -> Data {
         var body = Data()
         body.append(Data("--\(boundary)\r\n".utf8))
